@@ -57,7 +57,16 @@ export function activate(context: vscode.ExtensionContext) {
     }
 }
 
+export function deactivate(context: vscode.ExtensionContext) {
+    workspaceMemento.clear();
+    decorationType.dispose();
+    context.workspaceState.update('python-prev', undefined);
+    context.subscriptions.forEach((s) => s.dispose());
+    context.subscriptions.length = 0; // clear the array
+}
+
 async function previewRun(change: vscode.TextDocumentChangeEvent | { document: vscode.TextDocument, contentChanges: vscode.TextDocumentContentChangeEvent[] }) {
+    if (change.document.languageId !== 'python') return; // just in case the type changed midway through
     let fileName = change.document.fileName;
     let state = workspaceMemento.get(fileName) || [];
     if(change.contentChanges.length > 0 || state.length === 0)
@@ -110,6 +119,12 @@ async function runPython(line: number, documentText: string) {
     });
     await new Promise<void>((resolve) => {
         childProcess.on('close', () => {
+            if(childProcess)
+            {
+                childProcess.stdout.removeAllListeners();
+                childProcess.stderr.removeAllListeners();
+                childProcess.removeAllListeners();
+            }
             resolve();
         });
     });
@@ -202,5 +217,3 @@ function indentationFromLine(line: string, ignoreColon: boolean = false) {
 function endsWithColon(line: string) {
     return stripComments(line).trimEnd().endsWith(':');
 }
-
-export function deactivate() { }

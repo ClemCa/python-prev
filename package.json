@@ -47,7 +47,7 @@
         }
       }
     },
-    "activationEvents": ["onLanguage"],
+    "activationEvents": ["onLanguage:python"],
     "main": "./out/extension.js",
     "repository": {
       "type": "git",
