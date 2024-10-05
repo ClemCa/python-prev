@@ -71,18 +71,11 @@ async function previewRun(change: vscode.TextDocumentChangeEvent | { document: v
     let state = workspaceMemento.get(fileName) || [];
     if(change.contentChanges.length > 0 || state.length === 0)
     {
-        let line = change.contentChanges.length === 0 ? 0 : change.contentChanges[0].range.start.line;
-        if(line > earliestError)
-        {
-            line = earliestError;
-        }
-        let results = await runPython(line, change.document.getText());
+        let results = await runPython(change.document.getText());
         indentSize = vscode.workspace.getConfiguration('editor').get('tabSize') as number;
         earliestError = results.findIndex(r => r.startsWith('Error: '));
         if(earliestError === -1) earliestError = Infinity;
-        results.splice(0, line);
-        state.splice(line, Infinity);
-        state.push(...results);
+        state.splice(0, Infinity, ...results);
         workspaceMemento.set(fileName, state);
     }
     let currentCursorLine = vscode.window.activeTextEditor?.selection.active.line;
@@ -101,9 +94,9 @@ async function previewRun(change: vscode.TextDocumentChangeEvent | { document: v
     vscode.window.activeTextEditor.setDecorations(decorationType, decorations);
 }
 
-async function runPython(line: number, documentText: string) {
+async function runPython(documentText: string) {
     let lines = documentText.split(/\r?\n/);
-    let pythonCode = GeneratePython(lines, 0, line);
+    let pythonCode = GeneratePython(lines, 0);
     console.log("generated python code", pythonCode);
     let childProcess = child.spawn('python', ['-c', pythonCode]);
     let output = [] as string[];
@@ -160,6 +153,8 @@ function displayInline(line: number, text: string, decorationMode: DecorationMod
     console.log("Displaying", line, text, color);
     let lines = text.split(/\r?\n/);
     let decoration = { range, renderOptions: { after: { contentText: lines[lines.length - 1], color: color } } };
+    // is there already an identical decoration?
+    if(decorationArray.some(d => d.range.isEqual(range) && d.renderOptions?.after?.contentText === lines[lines.length - 1])) return;
     decorationArray.push(decoration);
 
 }
@@ -171,48 +166,57 @@ function setKeysFromOutput(map: Map<number, number>, output: string[]) {
         map.set(i, line);
     }
 }
-function GeneratePython(lines: string[], lineI: number, min: number, indentation: number = 0): string {
+function GeneratePython(lines: string[], lineI: number, indentation: number = 0): string {
     if (lineI >= lines.length) return '';
-    let print = lineI >= min;
     let line = lines[lineI];
     if (line.trim() === '') {
-        return ' '.repeat(indentation) + `print("${lineI}:")\n` + GeneratePython(lines, lineI + 1, min, indentation);
-    }
-    if (!print && !lines[lineI].match(/^\s*print\s*\(/)) { // we can't ignore print statements the same way
-        indentation = indentationFromLine(line);
-        return line + '\n' + ' '.repeat(indentation) + `print("${lineI}:")\n` + GeneratePython(lines, lineI + 1, min, indentation);
+        return ' '.repeat(indentation) + `print("${lineI}:")\n` + GeneratePython(lines, lineI + 1, indentation);
     }
     // line starts with assignment
     let assignmentMatch = line.match(/^\s*[a-zA-Z_][a-zA-Z_0-9]*\s*=/);
     if (assignmentMatch) {
         // print the assignment
         indentation = indentationFromLine(line);
-        return line + '\n' + ' '.repeat(indentation) + `print("${lineI}: " + str(${assignmentMatch[0].replace(/=/, '')}))\n` + GeneratePython(lines, lineI + 1, min, indentation);
+        return line + '\n' + ' '.repeat(indentation) + `print("${lineI}: " + str(${assignmentMatch[0].replace(/=/, '')}))\n` + GeneratePython(lines, lineI + 1, indentation);
     }
     // line starts with print
     if (line.match(/^\s*print\s*\(/)) {
         let modifiedLine = line.split("#")[0].replace(/print\s*\(/, `print("${lineI}:" + str(`) + ')';
         indentation = indentationFromLine(line);
-        return modifiedLine + '\n' + GeneratePython(lines, lineI + 1, min, indentation);
+        return modifiedLine + '\n' + GeneratePython(lines, lineI + 1, indentation);
     }
     // line is a for loop
     if (line.match(/^\s*for/)) {
         indentation = indentationFromLine(line, true);
         let afterIn = line.split('in')[1].split(':')[0].trim();
-        return ' '.repeat(indentation) + `print("${lineI}:"+str(${afterIn}))\n` + line + '\n' + GeneratePython(lines, lineI + 1, min, indentation + indentSize);
+        return ' '.repeat(indentation) + `print("${lineI}:"+str(${afterIn}))\n` + line + '\n' + GeneratePython(lines, lineI + 1, indentation + indentSize);
+    }
+    if (line.match(/^\s*return\s*/)) {
+        let latestValidDef = lineI;
+        let defIndentation = 0;
+        while (latestValidDef > 0 && (!lines[latestValidDef].match(/^\s*def/) || (defIndentation = indentationFromLine(lines[latestValidDef], true)) > indentation)) latestValidDef--;
+        indentation = indentationFromLine(line);
+        let afterReturn = line.split('return')[1].trim();
+        return ' '.repeat(indentation) + `print("${lineI}:"+str(${afterReturn}))\n` + line + '\n' + GeneratePython(lines, lineI + 1, defIndentation);
+    }
+    if (line.match(/^\s*def\s*/)) {
+        indentation = indentationFromLine(line);
+        let parameters = line.split('(')[1].split(')')[0].split(',').map(v => v.trim()).filter(v => v !== '');
+        let parameterStrings = parameters.map(v => ' '.repeat(indentation) + `print("${lineI}:${v}: "+str(${v}))`);
+        return line + '\n' + parameterStrings.join('\n') + '\n' + GeneratePython(lines, lineI + 1, indentation);
     }
     if (endsWithColon(line)) {
         indentation = indentationFromLine(line, true);
-        return ' '.repeat(indentation) + `print("${lineI}:")\n` + line + '\n' + GeneratePython(lines, lineI + 1, min, indentation + indentSize);
+        return ' '.repeat(indentation) + `print("${lineI}:")\n` + line + '\n' + GeneratePython(lines, lineI + 1, indentation + indentSize);
     }
     indentation = indentationFromLine(line);
-    return line + '\n' + ' '.repeat(indentation) + `print("${lineI}:")\n` + GeneratePython(lines, lineI + 1, min, indentation);
+    return line + '\n' + ' '.repeat(indentation) + `print("${lineI}:")\n` + GeneratePython(lines, lineI + 1, indentation);
 }
 function stripComments(line: string) {
     return line.split('#')[0];
 }
 function indentationFromLine(line: string, ignoreColon: boolean = false) {
-    return (line.match(/^\s*/)?.[0].length ?? 0) + (!ignoreColon && endsWithColon(line) ? indentSize : 0);
+    return (line.match(/^\s*/)?.[0].length ?? 0) + (ignoreColon === false && endsWithColon(line) ? indentSize : 0);
 }
 function endsWithColon(line: string) {
     return stripComments(line).trimEnd().endsWith(':');
