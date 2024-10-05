@@ -2,6 +2,8 @@
 
 A simple inline previewer for Python.
 
+![Cover Example](https://raw.githubusercontent.com/ClemCa/python-prev/main/demo-pic.png)
+
 ## Features
 
 - **Assignments**: See the value of variables after assignment.
