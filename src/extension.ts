@@ -94,7 +94,15 @@ async function previewRun(change: vscode.TextDocumentChangeEvent | { document: v
 
 async function runPython(documentText: string) {
     let lines = documentText.split(/\r?\n/);
-    let pythonCode = GeneratePython(lines, 0);
+    let pythonStarterCode =
+`clemca-python-prev-loop-dict = {}
+def check_UUID_count(UUID, limit):
+    if UUID not in clemca-python-prev-loop-dict:
+            clemca-python-prev-loop-dict[UUID] = 1
+    else:
+        clemca-python-prev-loop-dict[UUID] += 1
+    return clemca-python-prev-loop-dict[UUID] <= limit\n`;
+    let pythonCode = pythonStarterCode + GeneratePython(lines, 0);
     console.log("generated python code", pythonCode);
     let childProcess = child.spawn('python', ['-c', pythonCode]);
     let output = [] as string[];
@@ -170,6 +178,7 @@ function GeneratePython(lines: string[], lineI: number, indentation: number = 0)
     if (line.trim() === '') {
         return ' '.repeat(indentation) + `print("${lineI}:")\n` + GeneratePython(lines, lineI + 1, indentation);
     }
+    line = mockInput(line, indentation);
     // line starts with assignment
     let assignmentMatch = line.match(/^\s*[a-zA-Z_][a-zA-Z_0-9]*\s*=/);
     if (assignmentMatch) {
@@ -227,4 +236,24 @@ function indentationFromLine(line: string, ignoreColon: boolean = false) {
 }
 function endsWithColon(line: string) {
     return stripComments(line).trimEnd().endsWith(':');
+}
+function mockInput(line: string, indentation: number) {
+    let UUID = Math.random().toString(36).substring(2, 15) + Math.random().toString(36).substring(2, 15);
+    let comment = line.split('#')[1]?.trim() ?? '';
+    let {mock, limit} = passComments(comment);
+    let checkCode = ' '.repeat(indentation) + `if check_UUID_count('${UUID}', ${limit}):\n` + ' '.repeat(indentSize);
+    return checkCode + line.replace(/\sinput\(.*\)/, mock);
+}
+
+function passComments(comment: string): { limit: number, mock: string } {
+    if(comment === '') return { limit: 100, mock: "" };
+    if(comment.startsWith('mock: ('))
+    {
+        return { ...passComments(comment.slice(comment.indexOf(')'))), mock: comment.slice(6, comment.indexOf(')')) };
+    }
+    if(comment.startsWith('limit: ('))
+    {
+        return { ...passComments(comment.slice(comment.indexOf(')'))), limit: parseInt(comment.slice(7, comment.indexOf(')'))) };
+    }
+    return { limit: 100, mock: "" };
 }
