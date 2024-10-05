@@ -2,75 +2,200 @@
 import * as vscode from 'vscode';
 import * as child from 'child_process';
 
-let workspaceMemento: Map<string, string[]>
+let workspaceMemento: Map<string, string[]>;
+let decorationType: vscode.TextEditorDecorationType;
+let previewColor: string;
+let activeColor: string;
+let errorColor: string;
+let activeErrorColor: string;
+let skipNext = false;
+let earliestError = Infinity;
+
+enum DecorationMode {
+    regular,
+    active,
+    error,
+    activeError
+}
 
 export function activate(context: vscode.ExtensionContext) {
     workspaceMemento = context.workspaceState.get('python-prev') || new Map<string, string[]>();
+    decorationType = vscode.window.createTextEditorDecorationType({
+        after : {
+            margin: '0 0 0 10px'
+        },
+        rangeBehavior: vscode.DecorationRangeBehavior.ClosedClosed,
+        isWholeLine: true,
+    });
+    context.subscriptions.push(vscode.workspace.onDidChangeTextDocument((e) => {
+        skipNext = true;
+        previewRun(e);
+    }));
+    // line change
+    context.subscriptions.push(vscode.window.onDidChangeTextEditorSelection((e) => {
+        if(skipNext) return skipNext = false;
+        if(e.textEditor.document.languageId !== 'python') return;
+        previewRun({ document: e.textEditor.document, contentChanges: [] });
+    }));
+    context.subscriptions.push(vscode.languages.registerHoverProvider('python', {
+        async provideHover(document, position, token) {
+            let state = workspaceMemento.get(document.fileName) || [];
+            let line = position.line;
+            if(state.length <= line) return;
+            let hoverText = state[line];
+            let lineLength = document.lineAt(line).text.length;
+            if(position.character < lineLength) return;
+            if(position.character > lineLength + hoverText.split('\n')[0].length + 10) return;
+            return { contents: [hoverText] };
+        }
+    }));
+    if(vscode.window.activeTextEditor && vscode.window.activeTextEditor.document.languageId === 'python')
+    {
+        previewRun({ document: vscode.window.activeTextEditor.document, contentChanges: [] });
+    }
 }
 
-function previewRun(change: vscode.TextDocumentChangeEvent) {
+async function previewRun(change: vscode.TextDocumentChangeEvent | { document: vscode.TextDocument, contentChanges: vscode.TextDocumentContentChangeEvent[] }) {
     let fileName = change.document.fileName;
     let state = workspaceMemento.get(fileName) || [];
-    let line = change.contentChanges[0].range.start.line;
-    let results = runPython(line, change.document.getText());
-    state = state.splice(line).concat(results);
-    workspaceMemento.set(fileName, state);
+    if(change.contentChanges.length > 0 || state.length === 0)
+    {
+        let line = change.contentChanges.length === 0 ? 0 : change.contentChanges[0].range.start.line;
+        if(line > earliestError)
+        {
+            line = earliestError;
+        }
+        let results = await runPython(line, change.document.getText());
+        earliestError = results.findIndex(r => r.startsWith('Error: '));
+        if(earliestError === -1) earliestError = Infinity;
+        results.splice(0, line);
+        state.splice(line, Infinity);
+        state.push(...results);
+        workspaceMemento.set(fileName, state);
+    }
+    let currentCursorLine = vscode.window.activeTextEditor?.selection.active.line;
+    previewColor = vscode.workspace.getConfiguration('python-prev').get('color') as string;
+    activeColor = vscode.workspace.getConfiguration('python-prev').get('activeColor') as string;
+    errorColor = vscode.workspace.getConfiguration('python-prev').get('error') as string;
+    activeErrorColor = vscode.workspace.getConfiguration('python-prev').get('activeError') as string;
+    if(!vscode.window.activeTextEditor) return;
+    let decorations = [] as vscode.DecorationOptions[];
+    for (let i = 0; i < state.length; i++) {
+        let isError = state[i].startsWith('Error: ');
+        let isCurrent = currentCursorLine === i;
+        displayInline(i, state[i], isError ? isCurrent ? DecorationMode.activeError : DecorationMode.error : isCurrent ? DecorationMode.active : DecorationMode.regular, decorations);
+    }
+    vscode.window.activeTextEditor.setDecorations(decorationType, decorations);
 }
 
-function runPython(line: number, documentText: string) {
+async function runPython(line: number, documentText: string) {
     let lines = documentText.split(/\r?\n/);
-    let childProcess = child.spawn('python');
-    let results = runLine(lines, line, 0, childProcess);
+    let sourceMap = new Map();
+    let pythonCode = GeneratePython(lines, 0, line, sourceMap);
+    let childProcess = child.spawn('python', ['-c', pythonCode]);
+    let output = [] as string[];
+    childProcess.stdout.on('data', (data) => {
+        output.push(...(data.toString() as string).split(/\r?\n/).map(v => v.trim()).filter(v => v !== ''));
+    });
+    childProcess.stderr.on('data', (data) => {
+        let line = data.toString().match(/line (\d+)/)?.[1] - 1;
+        line = (sourceMap.get(line) ?? (line+1)) - 1;
+        while (output.length < line) output.push(output.length + ':');
+        output.push(line+': Error: ' + data.toString().trim());
+        console.log(output);
+    });
+    await new Promise<void>((resolve) => {
+        childProcess.on('close', () => {
+            resolve();
+        });
+    });
     // all lines start by line numbers, so the sort is just fine
-    results.sort((a, b) => a.localeCompare(b));
-    return results.map(r => r.replace(/^\d+:/, ''));
-    // TODO: test if it works as expected
+    output.sort((a, b) => a.localeCompare(b));
+    return output.map(r => r.slice(r.indexOf(':')+1).trim());
+
 }
 
-function runLine(lines: string[], lineI: number, min: number, childProcess: child.ChildProcess, missed = 0): string[] {
+function displayInline(line: number, text: string, decorationMode: DecorationMode, decorationArray: vscode.DecorationOptions[] = []) {
+    let editor = vscode.window.activeTextEditor;
+    if (!editor) return;
+    if(editor.document.lineCount <= line)
+    {
+        console.error("Line number out of range ("+line+": "+text+"), setting to last line");
+        line = editor.document.lineCount - 1;
+    }
+    let range = editor.document.lineAt(line).range;
+    let color: string;
+    switch(decorationMode) {
+        case DecorationMode.regular:
+            color = previewColor;
+            break;
+        case DecorationMode.active:
+            color = activeColor;
+            break;
+        case DecorationMode.error:
+            color = errorColor;
+            break;
+        case DecorationMode.activeError:
+            color = activeErrorColor;
+            break;
+    };
+    console.log("Displaying", line, text, color);
+    let lines = text.split(/\r?\n/);
+    let decoration = { range, renderOptions: { after: { contentText: lines[lines.length - 1], color: color } } };
+    decorationArray.push(decoration);
+
+}
+
+function setNextKeys(map: Map<number, number>, lineI: number, count: number) {
+    let keyArray = Array.from(map.keys());
+    let lastKey = keyArray[keyArray.length - 1] ?? lineI - 1;
+    while (count-- > 0)
+    {
+        map.set(++lastKey, lineI);
+    }
+}
+function GeneratePython(lines: string[], lineI: number, min: number, map: Map<number, number>, indentation: number = 0): string {
+    if (lineI >= lines.length) return '';
     let print = lineI >= min;
     let line = lines[lineI];
-    let stdIn = '';
     if (line.trim() === '') {
-        stdIn = `print("${line}:")\n`;
+        setNextKeys(map, lineI, 1);
+        return ' '.repeat(indentation) + `print("${lineI}:")\n` + GeneratePython(lines, lineI + 1, min, map, indentation);
     }
-    else if (!print) {
-        childProcess.stdin?.write(line + '\n');
-        stdIn = `print("${line}:")\n`;
+    if (!print && !lines[lineI].match(/^\s*print\s*\(/)) { // we can't ignore print statements the same way
+        indentation = indentationFromLine(line);
+        setNextKeys(map, lineI, 1);
+        return line + '\n' + ' '.repeat(indentation) + `print("${lineI}:")\n` + GeneratePython(lines, lineI + 1, min, map, indentation);
     }
-    else {
-        // line starts with assignment
-        let assignmentMatch = line.match(/^\s*[a-zA-Z_][a-zA-Z_0-9]*\s*=/);
-        if (assignmentMatch) {
-            // print the assignment
-            childProcess.stdin?.write(line + '\n');
-            stdIn = `print("${line}: " + ${assignmentMatch[0].replace(/=/, '')})\n`;
-        }
-        // line starts with print
-        else if (line.match(/^\s*print\s*\(/)) {
-            let modifiedLine = line.replace(/print\s*\(/, `print("${line}:" + `);
-            stdIn = modifiedLine + '\n';
-        }
-        // line is a for loop
-        else if (line.match(/^\s*for/)) {
-            childProcess.stdin?.write(line + '\n');
-            let afterIn = line.split('in')[1].split(':')[0].trim();
-            stdIn = `print("${line}:"+${afterIn})\n`;
-        }
-        else {
-            childProcess.stdin?.write(line + '\n');
-            stdIn = `print("${line}:")\n`;
-        }
+    // line starts with assignment
+    let assignmentMatch = line.match(/^\s*[a-zA-Z_][a-zA-Z_0-9]*\s*=/);
+    if (assignmentMatch) {
+        // print the assignment
+        indentation = indentationFromLine(line);
+        setNextKeys(map, lineI, 2);
+        return line + '\n' + ' '.repeat(indentation) + `print("${lineI}: " + str(${assignmentMatch[0].replace(/=/, '')}))\n` + GeneratePython(lines, lineI + 1, min, map, indentation);
     }
-    childProcess.stdin?.write(stdIn);
-    let stdOut = childProcess.stdout?.read() as Buffer | null;
-    let stdLines = stdOut?.toString().split(/\r?\n/) ?? [stdIn];
-    if (stdLines[stdLines.length - 1] === stdIn) {
-        return runLine(lines, lineI + 1, min, childProcess, missed + 1);
+    // line starts with print
+    if (line.match(/^\s*print\s*\(/)) {
+        let modifiedLine = line.split("#")[0].replace(/print\s*\(/, `print("${lineI}:" + str(`) + ')';
+        indentation = indentationFromLine(line);
+        setNextKeys(map, lineI, 1);
+        return modifiedLine + '\n' + GeneratePython(lines, lineI + 1, min, map, indentation);
     }
-    let slicedStd = stdLines.slice(Math.max(0, stdLines.length - missed - 1));
-    return [...slicedStd, ...runLine(lines, lineI + 1, min, childProcess)];
+    // line is a for loop
+    if (line.match(/^\s*for/)) {
+        indentation = indentationFromLine(line);
+        let afterIn = line.split('in')[1].split(':')[0].trim();
+        setNextKeys(map, lineI, 2);
+        return ' '.repeat(indentation) + `print("${lineI}:"+${afterIn})\n` + line + '\n' +  + GeneratePython(lines, lineI + 1, min, map, indentation);
+    }
+    indentation = indentationFromLine(line);
+    setNextKeys(map, lineI, 1);
+    return line + '\n' + ' '.repeat(indentation) + `print("${lineI}:")\n` + GeneratePython(lines, lineI + 1, min, map, indentation);
 }
 
+function indentationFromLine(line: string) {
+    return line.match(/^\s*/)?.[0].length ?? 0;
+}
 
 export function deactivate() { }

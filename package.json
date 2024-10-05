@@ -11,6 +11,42 @@
     "categories": [
       "Other"
     ],
+    "contributes": {
+      "languages": [
+        {
+          "id": "python",
+          "aliases": ["Python", "python"],
+          "extensions": [".py"],
+          "configuration": "./language-configuration.json"
+        }
+      ],
+      "configuration": {
+        "type": "object",
+        "title": "Python Prev",
+        "properties": {
+          "python-prev.color": {
+            "type": "string",
+            "default": "#FFFFFF20",
+            "description": "Default color for preview lines"
+          },
+          "python-prev.activeColor": {
+            "type": "string",
+            "default": "#FFFFFF88",
+            "description": "Color of the active preview line"
+          },
+          "python-prev.error": {
+            "type": "string",
+            "default": "#FF000088",
+            "description": "Default color for errors"
+          },
+          "python-prev.activeError": {
+            "type": "string",
+            "default": "#FF0000AA",
+            "description": "Color of the active preview error"
+          }
+        }
+      }
+    },
     "activationEvents": ["onLanguage"],
     "main": "./out/extension.js",
     "repository": {
