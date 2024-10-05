@@ -175,7 +175,7 @@ function GeneratePython(lines: string[], lineI: number, indentation: number = 0)
     if (assignmentMatch) {
         // print the assignment
         indentation = indentationFromLine(line);
-        return line + '\n' + ' '.repeat(indentation) + `print("${lineI}: " + str(${assignmentMatch[0].replace(/=/, '')}))\n` + GeneratePython(lines, lineI + 1, indentation);
+        return line + '\n' + ' '.repeat(indentation) + `print("${lineI}: " + str(${assignmentMatch[0].replace(/=/, '').trim()}))\n` + GeneratePython(lines, lineI + 1, indentation);
     }
     // line starts with print
     if (line.match(/^\s*print\s*\(/)) {
@@ -199,7 +199,7 @@ function GeneratePython(lines: string[], lineI: number, indentation: number = 0)
     }
     if (line.match(/^\s*def\s*/)) {
         indentation = indentationFromLine(line);
-        let parameters = line.split('(')[1].split(')')[0].split(',').map(v => v.trim()).filter(v => v !== '');
+        let parameters = line.split('(')[1].split(')')[0].split(',').map(v => v.split('=')[0].trim()).filter(v => v !== '');
         let parameterStrings = parameters.map(v => ' '.repeat(indentation) + `print("${lineI}:${v}: "+str(${v}))`);
         return line + '\n' + parameterStrings.join('\n') + '\n' + GeneratePython(lines, lineI + 1, indentation);
     }
