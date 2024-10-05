@@ -1,6 +1,6 @@
 # python-prev README
 
-A simple inline previewer for Python.
+A simple inline previewer for VSCode and Python.
 
 ![Cover Example](https://raw.githubusercontent.com/ClemCa/python-prev/main/demo-pic.png)
 
