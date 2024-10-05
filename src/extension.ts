@@ -61,8 +61,6 @@ export function deactivate(context: vscode.ExtensionContext) {
     workspaceMemento.clear();
     decorationType.dispose();
     context.workspaceState.update('python-prev', undefined);
-    context.subscriptions.forEach((s) => s.dispose());
-    context.subscriptions.length = 0; // clear the array
 }
 
 async function previewRun(change: vscode.TextDocumentChangeEvent | { document: vscode.TextDocument, contentChanges: vscode.TextDocumentContentChangeEvent[] }) {
