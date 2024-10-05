@@ -177,6 +177,15 @@ function GeneratePython(lines: string[], lineI: number, indentation: number = 0)
         indentation = indentationFromLine(line);
         return line + '\n' + ' '.repeat(indentation) + `print("${lineI}: " + str(${assignmentMatch[0].replace(/=/, '').trim()}))\n` + GeneratePython(lines, lineI + 1, indentation);
     }
+    let specialAssignmentMatch = line.match(/^\s*([a-zA-Z_][a-zA-Z_0-9]*)\s*([-\+\*\/])=/);
+    if(specialAssignmentMatch)
+    {
+        let variable = specialAssignmentMatch[1];
+        let operator = specialAssignmentMatch[2];
+        let restOfLine = stripComments(line.split('=')[1]).trim();
+        indentation = indentationFromLine(line);
+        return ' '.repeat(indentation) + `print("${lineI}: " + str(${variable} ${operator} (${restOfLine})))\n` + line + '\n' + GeneratePython(lines, lineI + 1, indentation);
+    }
     // line starts with print
     if (line.match(/^\s*print\s*\(/)) {
         let modifiedLine = line.split("#")[0].replace(/print\s*\(/, `print("${lineI}:" + str(`) + ')';
