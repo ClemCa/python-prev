@@ -110,11 +110,19 @@ def check_UUID_count(UUID, limit):
         output.push(...(data.toString() as string).split(/\r?\n/).map(v => v.trim()).filter(v => v !== ''));
     });
     childProcess.stderr.on('data', (data) => {
-        let line = data.toString().match(/line (\d+)/)?.[1] - 1;
-        line = (sourceMap.get(line) ?? (line+1)) - 1;
+        let dataString = data.toString();
+        let line = dataString.match(/ClemExcep(\d+):/)?.[1];
+        if(line)
+        {
+            dataString = dataString.replace(/ClemExcep\d+:/, '').replace("Exception: ", "Python Prev:").trim();
+        }
+        else
+        {
+            line = dataString.match(/line (\d+)/)?.[1];
+            line = (sourceMap.get(line) ?? (line+1)) - 1;
+        }
         while (output.length < line) output.push(output.length + ':');
-        output.push(line+': Error: ' + data.toString().trim());
-        console.log(output);
+        output.push(line+': Error: ' + dataString.trim());
     });
     await new Promise<void>((resolve) => {
         setTimeout(() => {
@@ -125,7 +133,7 @@ def check_UUID_count(UUID, limit):
                 output.push(lastLine + 1 + ':Error: Timeout');
             }
             else {
-                output.push('Error: Timeout');
+                output.push('0:Error: Timeout');
             }
             childProcess.stdout.removeAllListeners();
             childProcess.stderr.removeAllListeners();
@@ -197,53 +205,54 @@ function GeneratePython(lines: string[], lineI: number, indentation: number = 0)
     {
         return line + '\n' + ' '.repeat(indentation + indentSize) + `print("${lineI}:")\n` + GeneratePython(lines, lineI + 1, indentation + (line.trim().endsWith(':') ? indentSize : 0));
     }
-    line = mockInput(line, indentation);
+    let checkLine = line;
+    line = mockInput(line, indentation, lineI);
     // line starts with assignment
-    let assignmentMatch = line.match(/^\s*[a-zA-Z_][a-zA-Z_0-9]*\s*=/);
+    let assignmentMatch = checkLine.match(/^\s*[a-zA-Z_][a-zA-Z_0-9]*\s*=/);
     if (assignmentMatch) {
         // print the assignment
-        indentation = indentationFromLine(line);
+        indentation = indentationFromLine(checkLine);
         return line + '\n' + ' '.repeat(indentation) + `print("${lineI}: " + str(${assignmentMatch[0].replace(/=/, '').trim()}))\n` + GeneratePython(lines, lineI + 1, indentation);
     }
-    let specialAssignmentMatch = line.match(/^\s*([a-zA-Z_][a-zA-Z_0-9]*)\s*([-\+\*\/])=/);
+    let specialAssignmentMatch = checkLine.match(/^\s*([a-zA-Z_][a-zA-Z_0-9]*)\s*([-\+\*\/])=/);
     if(specialAssignmentMatch)
     {
         let variable = specialAssignmentMatch[1];
         let operator = specialAssignmentMatch[2];
-        let restOfLine = stripComments(line.split('=')[1]).trim();
-        indentation = indentationFromLine(line);
+        let restOfLine = stripComments(checkLine.split('=')[1]).trim();
+        indentation = indentationFromLine(checkLine);
         return ' '.repeat(indentation) + `print("${lineI}: " + str(${variable} ${operator} (${restOfLine})))\n` + line + '\n' + GeneratePython(lines, lineI + 1, indentation);
     }
     // line starts with print
-    if (line.match(/^\s*print\s*\(/)) {
+    if (checkLine.match(/^\s*print\s*\(/)) {
         let modifiedLine = line.split("#")[0].replace(/print\s*\(/, `print("${lineI}:" + str(`) + ')';
-        indentation = indentationFromLine(line);
+        indentation = indentationFromLine(checkLine);
         return modifiedLine + '\n' + GeneratePython(lines, lineI + 1, indentation);
     }
     // line is a for loop
-    if (line.match(/^\s*for/)) {
-        indentation = indentationFromLine(line, true);
-        let afterIn = line.split('in')[1].split(':')[0].trim();
+    if (checkLine.match(/^\s*for/)) {
+        indentation = indentationFromLine(checkLine, true);
+        let afterIn = checkLine.split('in')[1].split(':')[0].trim();
         return ' '.repeat(indentation) + `print("${lineI}:"+str(${afterIn}))\n` + line + '\n' + GeneratePython(lines, lineI + 1, indentation + indentSize);
     }
-    if (line.match(/^\s*return\s*/)) {
+    if (checkLine.match(/^\s*return\s*/)) {
         let nextIndentation = indentationFromLine(lines[lineI + 1], true);
-        indentation = indentationFromLine(line);
-        let afterReturn = line.split('return')[1].trim();
+        indentation = indentationFromLine(checkLine);
+        let afterReturn = checkLine.split('return')[1].trim();
         if(afterReturn.indexOf(' ') !== -1) afterReturn = '(' + afterReturn + ')';
         return ' '.repeat(indentation) + `print("${lineI}:"+str(${afterReturn}))\n` + line + '\n' + GeneratePython(lines, lineI + 1, nextIndentation);
     }
-    if (line.match(/^\s*def\s*/)) {
-        indentation = indentationFromLine(line);
-        let parameters = line.split('(')[1].split(')')[0].split(',').map(v => v.split('=')[0].trim()).filter(v => v !== '');
+    if (checkLine.match(/^\s*def\s*/)) {
+        indentation = indentationFromLine(checkLine);
+        let parameters = checkLine.split('(')[1].split(')')[0].split(',').map(v => v.split('=')[0].trim()).filter(v => v !== '');
         let parameterStrings = parameters.map(v => ' '.repeat(indentation) + `print("${lineI}:${v}: "+str(${v}))`);
         return line + '\n' + parameterStrings.join('\n') + '\n' + GeneratePython(lines, lineI + 1, indentation);
     }
-    if (endsWithColon(line)) {
-        indentation = indentationFromLine(line, true);
+    if (endsWithColon(checkLine)) {
+        indentation = indentationFromLine(checkLine, true);
         return ' '.repeat(indentation) + `print("${lineI}:")\n` + line + '\n' + GeneratePython(lines, lineI + 1, indentation + indentSize);
     }
-    indentation = indentationFromLine(line);
+    indentation = indentationFromLine(checkLine);
     return line + '\n' + ' '.repeat(indentation) + `print("${lineI}:")\n` + GeneratePython(lines, lineI + 1, indentation);
 }
 function stripComments(line: string) {
@@ -255,24 +264,35 @@ function indentationFromLine(line: string, ignoreColon: boolean = false) {
 function endsWithColon(line: string) {
     return stripComments(line).trimEnd().endsWith(':');
 }
-function mockInput(line: string, indentation: number) {
-    if(!line.match(/\s+input\s*\(/)) return line;
+function mockInput(line: string, indentation: number, lineI: number) {
+    if(!line.match(/\s+input\s*\(/)) return limitLine(line, lineI);
     let UUID = Math.random().toString(36).substring(2, 15) + Math.random().toString(36).substring(2, 15);
     let comment = line.split('#')[1]?.trim() ?? '';
     let {mock, limit} = passComments(comment);
-    let checkCode = ' '.repeat(indentation) + `if not check_UUID_count('${UUID}', ${limit}):\n` + ' '.repeat(indentSize + indentation) + "raise Exception('Too many calls to input. Use a mock comment if necessary.')\n";
-    return checkCode + line.replace(/input\(.*\)/, mock);
+    let checkCode = ' '.repeat(indentation) + `if not check_UUID_count('${UUID}', ${limit ?? 100}):\n` + ' '.repeat(indentSize + indentation) + "raise Exception('ClemExcep"+lineI+":Too many calls to input. Use a mock comment if necessary.')\n";
+    return checkCode + line.replace(/input\(.*\)/, mock ?? "");
 }
 
-function passComments(comment: string): { limit: number, mock: string } {
-    if(comment === '') return { limit: 100, mock: "\"\"" };
+function limitLine(line: string, lineI: number) {
+    let comment = line.split('#')[1]?.trim() ?? '';
+    let {limit} = passComments(comment);
+    if(!limit) return line;
+    console.log("limiting to ", limit);
+    let indentation = indentationFromLine(line, true);
+    let UUID = Math.random().toString(36).substring(2, 15) + Math.random().toString(36).substring(2, 15);
+    return ' '.repeat(indentation) + `if not check_UUID_count('${UUID}', ${limit}):\n` + ' '.repeat(indentSize + indentation) + "raise Exception('ClemExcep"+lineI+":Too many calls.')\n"+line;
+}
+
+function passComments(comment: string): { limit?: number, mock?: string } {
+    if(comment === '') return {};
     if(comment.startsWith('mock (') || comment.startsWith('mock('))
     {
         return { ...passComments(comment.slice(comment.indexOf(')'))), mock: comment.slice(comment.indexOf('(')+1, comment.indexOf(')')) };
     }
     if(comment.startsWith('limit (') || comment.startsWith('limit('))
     {
+        console.log("found limit of ", comment.slice(comment.indexOf('(')+1, comment.indexOf(')')));
         return { ...passComments(comment.slice(comment.indexOf(')'))), limit: parseInt(comment.slice(comment.indexOf('(')+1, comment.indexOf(')'))) };
     }
-    return { limit: 100, mock: "\"\"" };
+    return {};
 }
