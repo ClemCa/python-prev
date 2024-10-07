@@ -84,7 +84,7 @@ async function previewRun(change: vscode.TextDocumentChangeEvent | { document: v
     if(!vscode.window.activeTextEditor) return;
     let decorations = [] as vscode.DecorationOptions[];
     for (let i = 0; i < state.length; i++) {
-        let mappedLine = sourceMap.get(i) ?? vscode.window.activeTextEditor.document.lineCount - 1;
+        let mappedLine = sourceMap.get(i) ?? i;
         let isError = state[i].startsWith('Error: ');
         let isCurrent = currentCursorLine === mappedLine;
         displayInline(mappedLine, state[i], isError ? isCurrent ? DecorationMode.activeError : DecorationMode.error : isCurrent ? DecorationMode.active : DecorationMode.regular, decorations);
@@ -117,6 +117,21 @@ def check_UUID_count(UUID, limit):
         console.log(output);
     });
     await new Promise<void>((resolve) => {
+        setTimeout(() => {
+            childProcess.kill();
+            if(output.length > 0)
+            {
+                let lastLine = parseInt(output[output.length - 1].split(':')[0]);
+                output.push(lastLine + 1 + ':Error: Timeout');
+            }
+            else {
+                output.push('Error: Timeout');
+            }
+            childProcess.stdout.removeAllListeners();
+            childProcess.stderr.removeAllListeners();
+            childProcess.removeAllListeners();
+            resolve();
+        }, vscode.workspace.getConfiguration('python-prev').get('timeout') as number);
         childProcess.on('close', () => {
             if(childProcess)
             {

@@ -43,11 +43,16 @@
             "type": "string",
             "default": "#FF0000AA",
             "description": "Color of the active preview error"
+          },
+          "python-prev.timeout": {
+            "type": "number",
+            "default": 1000,
+            "description": "Time in ms to wait for execution before declaring a timeout"
           }
         }
       }
     },
-    "activationEvents": ["onLanguage:python"],
+    "activationEvents": [],
     "main": "./out/extension.js",
     "repository": {
       "type": "git",
