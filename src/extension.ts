@@ -277,7 +277,6 @@ function limitLine(line: string, lineI: number) {
     let comment = line.split('#')[1]?.trim() ?? '';
     let {limit} = passComments(comment);
     if(!limit) return line;
-    console.log("limiting to ", limit);
     let indentation = indentationFromLine(line, true);
     let UUID = Math.random().toString(36).substring(2, 15) + Math.random().toString(36).substring(2, 15);
     return ' '.repeat(indentation) + `if not check_UUID_count('${UUID}', ${limit}):\n` + ' '.repeat(indentSize + indentation) + "raise Exception('ClemExcep"+lineI+":Too many calls.')\n"+line;
@@ -291,7 +290,6 @@ function passComments(comment: string): { limit?: number, mock?: string } {
     }
     if(comment.startsWith('limit (') || comment.startsWith('limit('))
     {
-        console.log("found limit of ", comment.slice(comment.indexOf('(')+1, comment.indexOf(')')));
         return { ...passComments(comment.slice(comment.indexOf(')'))), limit: parseInt(comment.slice(comment.indexOf('(')+1, comment.indexOf(')'))) };
     }
     return {};
