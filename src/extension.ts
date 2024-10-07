@@ -84,7 +84,7 @@ async function previewRun(change: vscode.TextDocumentChangeEvent | { document: v
     if(!vscode.window.activeTextEditor) return;
     let decorations = [] as vscode.DecorationOptions[];
     for (let i = 0; i < state.length; i++) {
-        let mappedLine = sourceMap.get(i);
+        let mappedLine = sourceMap.get(i) ?? vscode.window.activeTextEditor.document.lineCount - 1;
         let isError = state[i].startsWith('Error: ');
         let isCurrent = currentCursorLine === mappedLine;
         displayInline(mappedLine, state[i], isError ? isCurrent ? DecorationMode.activeError : DecorationMode.error : isCurrent ? DecorationMode.active : DecorationMode.regular, decorations);
@@ -95,13 +95,13 @@ async function previewRun(change: vscode.TextDocumentChangeEvent | { document: v
 async function runPython(documentText: string) {
     let lines = documentText.split(/\r?\n/);
     let pythonStarterCode =
-`clemca-python-prev-loop-dict = {}
+`clemca_python_prev_loop_dict = {}
 def check_UUID_count(UUID, limit):
-    if UUID not in clemca-python-prev-loop-dict:
-            clemca-python-prev-loop-dict[UUID] = 1
+    if UUID not in clemca_python_prev_loop_dict:
+        clemca_python_prev_loop_dict[UUID] = 1
     else:
-        clemca-python-prev-loop-dict[UUID] += 1
-    return clemca-python-prev-loop-dict[UUID] <= limit\n`;
+        clemca_python_prev_loop_dict[UUID] += 1
+    return clemca_python_prev_loop_dict[UUID] <= limit\n`;
     let pythonCode = pythonStarterCode + GeneratePython(lines, 0);
     console.log("generated python code", pythonCode);
     let childProcess = child.spawn('python', ['-c', pythonCode]);
@@ -178,6 +178,10 @@ function GeneratePython(lines: string[], lineI: number, indentation: number = 0)
     if (line.trim() === '') {
         return ' '.repeat(indentation) + `print("${lineI}:")\n` + GeneratePython(lines, lineI + 1, indentation);
     }
+    if(line.match(/^\s*(?:elif|else)/))
+    {
+        return line + '\n' + ' '.repeat(indentation + indentSize) + `print("${lineI}:")\n` + GeneratePython(lines, lineI + 1, indentation + (line.trim().endsWith(':') ? indentSize : 0));
+    }
     line = mockInput(line, indentation);
     // line starts with assignment
     let assignmentMatch = line.match(/^\s*[a-zA-Z_][a-zA-Z_0-9]*\s*=/);
@@ -208,12 +212,11 @@ function GeneratePython(lines: string[], lineI: number, indentation: number = 0)
         return ' '.repeat(indentation) + `print("${lineI}:"+str(${afterIn}))\n` + line + '\n' + GeneratePython(lines, lineI + 1, indentation + indentSize);
     }
     if (line.match(/^\s*return\s*/)) {
-        let latestValidDef = lineI;
-        let defIndentation = 0;
-        while (latestValidDef > 0 && (!lines[latestValidDef].match(/^\s*def/) || (defIndentation = indentationFromLine(lines[latestValidDef], true)) > indentation)) latestValidDef--;
+        let nextIndentation = indentationFromLine(lines[lineI + 1], true);
         indentation = indentationFromLine(line);
         let afterReturn = line.split('return')[1].trim();
-        return ' '.repeat(indentation) + `print("${lineI}:"+str(${afterReturn}))\n` + line + '\n' + GeneratePython(lines, lineI + 1, defIndentation);
+        if(afterReturn.indexOf(' ') !== -1) afterReturn = '(' + afterReturn + ')';
+        return ' '.repeat(indentation) + `print("${lineI}:"+str(${afterReturn}))\n` + line + '\n' + GeneratePython(lines, lineI + 1, nextIndentation);
     }
     if (line.match(/^\s*def\s*/)) {
         indentation = indentationFromLine(line);
@@ -238,22 +241,23 @@ function endsWithColon(line: string) {
     return stripComments(line).trimEnd().endsWith(':');
 }
 function mockInput(line: string, indentation: number) {
+    if(!line.match(/\s+input\s*\(/)) return line;
     let UUID = Math.random().toString(36).substring(2, 15) + Math.random().toString(36).substring(2, 15);
     let comment = line.split('#')[1]?.trim() ?? '';
     let {mock, limit} = passComments(comment);
-    let checkCode = ' '.repeat(indentation) + `if check_UUID_count('${UUID}', ${limit}):\n` + ' '.repeat(indentSize);
-    return checkCode + line.replace(/\sinput\(.*\)/, mock);
+    let checkCode = ' '.repeat(indentation) + `if not check_UUID_count('${UUID}', ${limit}):\n` + ' '.repeat(indentSize + indentation) + "raise Exception('Too many calls to input. Use a mock comment if necessary.')\n";
+    return checkCode + line.replace(/input\(.*\)/, mock);
 }
 
 function passComments(comment: string): { limit: number, mock: string } {
-    if(comment === '') return { limit: 100, mock: "" };
-    if(comment.startsWith('mock: ('))
+    if(comment === '') return { limit: 100, mock: "\"\"" };
+    if(comment.startsWith('mock (') || comment.startsWith('mock('))
     {
-        return { ...passComments(comment.slice(comment.indexOf(')'))), mock: comment.slice(6, comment.indexOf(')')) };
+        return { ...passComments(comment.slice(comment.indexOf(')'))), mock: comment.slice(comment.indexOf('(')+1, comment.indexOf(')')) };
     }
-    if(comment.startsWith('limit: ('))
+    if(comment.startsWith('limit (') || comment.startsWith('limit('))
     {
-        return { ...passComments(comment.slice(comment.indexOf(')'))), limit: parseInt(comment.slice(7, comment.indexOf(')'))) };
+        return { ...passComments(comment.slice(comment.indexOf(')'))), limit: parseInt(comment.slice(comment.indexOf('(')+1, comment.indexOf(')'))) };
     }
-    return { limit: 100, mock: "" };
+    return { limit: 100, mock: "\"\"" };
 }
