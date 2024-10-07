@@ -1,4 +1,4 @@
-# python-prev README
+# Python Prev
 
 A simple inline previewer for VSCode and Python.
 
