@@ -265,7 +265,7 @@ function endsWithColon(line: string) {
     return stripComments(line).trimEnd().endsWith(':');
 }
 function mockInput(line: string, indentation: number, lineI: number) {
-    if(!line.match(/\s+input\s*\(/)) return limitLine(line, lineI);
+    if(!line.match(/\s+input\s*\(/)) return mockOrLimitLine(line, lineI);
     let UUID = Math.random().toString(36).substring(2, 15) + Math.random().toString(36).substring(2, 15);
     let comment = line.split('#')[1]?.trim() ?? '';
     let {mock, limit} = passComments(comment);
@@ -273,13 +273,19 @@ function mockInput(line: string, indentation: number, lineI: number) {
     return checkCode + line.replace(/input\(.*\)/, mock ?? '""');
 }
 
-function limitLine(line: string, lineI: number) {
+function mockOrLimitLine(line: string, lineI: number) {
     let comment = line.split('#')[1]?.trim() ?? '';
-    let {limit} = passComments(comment);
+    let {mock, limit} = passComments(comment);
+    if(mock) line = mockLine(line, mock);
     if(!limit) return line;
     let indentation = indentationFromLine(line, true);
     let UUID = Math.random().toString(36).substring(2, 15) + Math.random().toString(36).substring(2, 15);
     return ' '.repeat(indentation) + `if not check_UUID_count('${UUID}', ${limit}):\n` + ' '.repeat(indentSize + indentation) + "raise Exception('ClemExcep"+lineI+":Too many calls.')\n"+line;
+}
+
+function mockLine(line: string, mock: string) {
+    if(line.indexOf("=") === -1) return line;
+    return line.replace(/=.*$/, `= ${mock}`);
 }
 
 function passComments(comment: string): { limit?: number, mock?: string } {
