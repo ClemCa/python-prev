@@ -9,7 +9,7 @@ A simple inline previewer for VSCode and Python.
 - **Assignments**: See the value of variables after assignment.
 - **Loops**: See the range or values iterated over in for loops.
 - **Errors**: See error messages inline.
-- **Input Mocking**: Mock input() calls with a custom value. (# mock (value))
+- **Input Mocking**: Mock input() calls or any assignment with a custom value. By default input is mocked to an empty string (# mock (value))
 - **Calling Limit**: Limit the number of times a line can be called. (# limit (number))
 
 ## Extension Settings

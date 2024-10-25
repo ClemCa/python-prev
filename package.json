@@ -3,7 +3,7 @@
     "displayName": "Python Prev",
     "description": "Line Preview for Python",
     "publisher": "ClemCa",
-    "version": "0.0.8",
+    "version": "0.0.9",
     "engines": {
       "vscode": "^1.87.0"
     },
