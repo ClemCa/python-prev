@@ -270,7 +270,7 @@ function mockInput(line: string, indentation: number, lineI: number) {
     let comment = line.split('#')[1]?.trim() ?? '';
     let {mock, limit} = passComments(comment);
     let checkCode = ' '.repeat(indentation) + `if not check_UUID_count('${UUID}', ${limit ?? 100}):\n` + ' '.repeat(indentSize + indentation) + "raise Exception('ClemExcep"+lineI+":Too many calls to input. Use a mock comment if necessary.')\n";
-    return checkCode + line.replace(/input\(.*\)/, mock ?? "");
+    return checkCode + line.replace(/input\(.*\)/, mock ?? '""');
 }
 
 function limitLine(line: string, lineI: number) {
