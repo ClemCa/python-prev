@@ -84,10 +84,13 @@ async function previewRun(change: vscode.TextDocumentChangeEvent | { document: v
     if(!vscode.window.activeTextEditor) return;
     let decorations = [] as vscode.DecorationOptions[];
     for (let i = 0; i < state.length; i++) {
-        let mappedLine = sourceMap.get(i) ?? i;
         let isError = state[i].startsWith('Error: ');
+        let mappedLine = sourceMap.get(i) ?? i;
         let isCurrent = currentCursorLine === mappedLine;
-        displayInline(mappedLine, state[i], isError ? isCurrent ? DecorationMode.activeError : DecorationMode.error : isCurrent ? DecorationMode.active : DecorationMode.regular, decorations);
+        let stateLine = state[i].substring(state[i].indexOf(':')+1).trim();
+        if(stateLine === '') continue;
+        console.log("mapped line", mappedLine, "stateline:", stateLine,"from", state[i]);
+        displayInline(mappedLine, stateLine, isError ? isCurrent ? DecorationMode.activeError : DecorationMode.error : isCurrent ? DecorationMode.active : DecorationMode.regular, decorations);
     }
     vscode.window.activeTextEditor.setDecorations(decorationType, decorations);
 }
@@ -153,8 +156,10 @@ def check_UUID_count(UUID, limit):
         });
     });
     output = Fuse(output);
+    console.log("Fused", output);
     setKeysFromOutput(sourceMap, output);
-    return output.map(r => r.slice(r.indexOf(':')+1).trim());
+    return output;
+    // return output.map(r => r.slice(r.indexOf(':')+1).trim());
 }
 
 function Deduplicate(output: string[]) { // we keep the original order
@@ -166,32 +171,29 @@ function Deduplicate(output: string[]) { // we keep the original order
 }
 
 function Fuse(output: string[]) { // fuse, vscode forces our hand as the order of decorations is consistent but not guaranteed to be in the order of the array
+    console.log("raw output", output);
     output = Deduplicate(output);
     let fused = [] as string[];
-    let originalLength = output.length;
-    for(let i = 0; i < originalLength; i++) // couldn't bring myself to make it O(n^2), so we're removing elements from the array.
+    let highestValue = 0;
+    for(let i = 0; i < output.length; i++)
+    {
+        let line = parseInt(output[i].split(':')[0]);
+        if(line > highestValue) highestValue = line;
+    }
+    for(let i = 0; i <= highestValue; i++) // couldn't bring myself to make it O(n^2), so we're removing elements from the array.
     {                                           // In theory we have a diminishing number of elements to check in the inner loop.
         for(let j = 0; j < output.length; j++)
         {
             if(output[j].startsWith(i+':'))
             {
-                fused[i] =  ((fused[i] ?? '') + '  ' + splitUpTo(output[j], ':',1)[1]).trim();
+                if(fused[i] === undefined || fused[i] === '') fused[i] = i + ':';
+                fused[i] = ((fused[i] ?? '') + '  ' + splitUpTo(output[j], ':',1)[1]).trim();
                 output.splice(j, 1);
                 j--;
             }
         }
     }
-    for(let i = 0; i < fused.length; i++)
-    {
-        if(fused[i] !== undefined) {
-            fused[i] = i + ':' + fused[i].trim();
-        }
-        if(output[i] !== undefined) { // non-conforming output, could have some purpose in a future version, we just keep it around so we don't have to search where it's removed the day we do something like that
-            fused.push(output[i].trim());
-        }
-    }
-    console.log("Fused", fused);
-    return fused;
+    return fused.filter(v => v !== undefined && v !== '' && splitUpTo(v, ':', 1)[1].trim() !== '');
 }
 
 function splitUpTo(s: string, separator: string, limit: number) {
@@ -253,7 +255,6 @@ function setKeysFromCode(map: Map<number, number>, code: string) {
         {
             line = line.split(':')[0];
             let lineNum = parseInt(line.slice(line.indexOf('"') + 1)) + 1;
-            console.log("setting line number", i, lineNum, line);
             map.set(i, lineNum);
             last = lineNum;
         } else {
@@ -290,7 +291,7 @@ function GeneratePython(lines: string[], lineI: number, indentation: number = 0)
     }
     if(line.match(/^\s*(?:elif|else)/))
     {
-        return line + '\n' + ' '.repeat(indentation + indentSize) + `print("${lineI}:")\n` + ' '.repeat(additionalLines.length > 0 ? indentation : 0) + additionalLines + GeneratePython(lines, continueLine, indentation + (line.trim().endsWith(':') ? indentSize : 0));
+        return line + '\n' + ' '.repeat(indentation) + `print("${lineI}:")\n` + ' '.repeat(additionalLines.length > 0 ? indentation : 0) + additionalLines + GeneratePython(lines, continueLine, indentation);
     }
     let checkLine = line + '';
     line = mockInput(line, indentation, lineI, lines);
