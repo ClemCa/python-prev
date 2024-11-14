@@ -339,7 +339,7 @@ function GeneratePython(lines: string[], lineI: number, indentation: number = 0)
     }
     if (checkLine.match(/^\s*def\s*/) && !(checkLine.split('#')[1] ?? "").match(/mock\s?\(/)) {
         indentation = indentationFromLine(checkLine);
-        let parameters = checkLine.split('(')[1].split(')')[0].split(',').map(v => v.split('=')[0].split(':')[0].trim()).filter(v => v !== '');
+        let parameters = checkLine.split('(')[1].split(')')[0].split(',').map(v => v.split('=')[0].split(':')[0].trim()).filter((v, i) => i !== 0 || v !== "self").filter(v => v !== '');
         let parameterStrings = parameters.map(v => ' '.repeat(indentation) + `print("${lineI}:${v}: "+str(${v}))`);
         return line + '\n' + parameterStrings.join('\n') + '\n' + ' '.repeat(additionalLines.length > 0 ? indentation : 0) + additionalLines + GeneratePython(lines, continueLine, indentation);
     }
