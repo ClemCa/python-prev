@@ -302,7 +302,7 @@ function GeneratePython(lines: string[], lineI: number, indentation: number = 0)
         return line + '\n' + GeneratePython(lines, endOfDef, indentation);
     }
     // line starts with assignment
-    let assignmentMatch = checkLine.match(/^\s*[a-zA-Z_][a-zA-Z_0-9]*\s*=/);
+    let assignmentMatch = checkLine.match(/^\s*[a-zA-Z_][a-zA-Z_0-9\.]*\s*=/);
     if (assignmentMatch) {
         // print the assignment
         indentation = indentationFromLine(checkLine);
