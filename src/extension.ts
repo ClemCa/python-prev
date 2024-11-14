@@ -318,7 +318,7 @@ function GeneratePython(lines: string[], lineI: number, indentation: number = 0)
         return ' '.repeat(indentation) + `print("${lineI}: " + str(${variable} ${operator} (${restOfLine})))\n` + line + '\n' + ' '.repeat(additionalLines.length > 0 ? indentation : 0) + additionalLines + GeneratePython(lines, continueLine, indentation);
     }
     // line starts with print and isn't a multiline
-    if (checkLine.match(/^\s*print\s*/) && !returnPreviously) {
+    if (checkLine.match(/^\s*print\s*\(/) && !returnPreviously) {
         let modifiedLine = line.split("#")[0].replace(/print\s*\(/, `print("${lineI}:" + str(`) + ')';
         indentation = indentationFromLine(checkLine);
         return modifiedLine + '\n' + ' '.repeat(additionalLines.length > 0 ? indentation : 0) + additionalLines + GeneratePython(lines, continueLine, indentation);
@@ -347,6 +347,7 @@ function GeneratePython(lines: string[], lineI: number, indentation: number = 0)
         indentation = indentationFromLine(checkLine, true);
         return ' '.repeat(indentation) + `print("${lineI}:")\n` + line + '\n' + ' '.repeat(additionalLines.length > 0 ? indentation : 0) + additionalLines + GeneratePython(lines, continueLine, indentation + indentSize);
     }
+    console.log("matched nothing for", checkLine);
     indentation = indentationFromLine(checkLine);
     return line + '\n' + ' '.repeat(indentation) + `print("${lineI}:")\n` + ' '.repeat(additionalLines.length > 0 ? indentation : 0) + additionalLines + GeneratePython(lines, continueLine, indentation);
 }
