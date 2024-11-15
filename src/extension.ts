@@ -386,7 +386,7 @@ function GeneratePython(lines: string[], lineI: number, indentation: number = 0)
     if (checkLine.match(/^\s*return\s+/) || returnPreviously) {
         let nextIndentation = continueLine >= lines.length ? 0 : indentationFromLine(lines[continueLine], true);
         indentation = indentationFromLine(checkLine);
-        let afterReturn = checkLine.split('return')[1].trim();
+        let afterReturn = checkLine.split('return')[1].split('#')[0].trim();
         let beforeReturn = checkLine.split('return')[0]; // there's pregenerated stuff we want to keep
         if(afterReturn.indexOf(' ') !== -1) afterReturn = '(' + afterReturn + ')';
         return beforeReturn + `print("${lineI}:"+str(${afterReturn}))\n` + ' '.repeat(indentation) + 'return ' + afterReturn + '\n' + additionalLines.split('\n').filter((v) => v.trim() !== "").map((v) => ' '.repeat(indentation) + v).join('\n') + (additionalLines.length > 0 ? '\n' : '') + GeneratePython(lines, continueLine, nextIndentation);
