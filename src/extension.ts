@@ -99,12 +99,27 @@ async function runPython(documentText: string) {
     let lines = documentText.split(/\r?\n/);
     let pythonStarterCode =
 `clemca_python_prev_loop_dict = {}
-def check_UUID_count(UUID, limit):
+clemca_never_run_dict = {}
+def clemca_check_UUID_count(UUID, limit):
     if UUID not in clemca_python_prev_loop_dict:
         clemca_python_prev_loop_dict[UUID] = 1
     else:
         clemca_python_prev_loop_dict[UUID] += 1
-    return clemca_python_prev_loop_dict[UUID] <= limit\n`;
+    return clemca_python_prev_loop_dict[UUID] <= limit
+def clemca_register_run(line):
+    clemca_never_run_dict[line] += 1
+def clemca_make_entry(line):
+    clemca_never_run_dict[line] = 0
+def clemca_print_never_run():
+    for key in clemca_never_run_dict:
+        if clemca_never_run_dict[key] == 0:
+            print(key+":"+"!!! Never runs")
+        else:
+            print(key+":"+str(clemca_never_run_dict[key])+" iterations")
+import atexit
+def clemca_exit_handler():
+    clemca_print_never_run()
+atexit.register(clemca_exit_handler)\n`;
     let pythonCode = pythonStarterCode + GeneratePython(lines, 0);
     setKeysFromCode(sourceMap, pythonCode);
     console.log("generated python code", pythonCode, "with source map", sourceMap);
@@ -122,12 +137,24 @@ def check_UUID_count(UUID, limit):
         }
         else
         {
+            function lookForIndex(index: number) {
+                lines = pythonCode.split(/\r?\n/);
+                for(let i = index; i >= 0; i--)
+                {
+                    if(lines[i].trim().match(/^\s*print\s*\(/)) return Number.parseInt(lines[i].split(':')[0]);
+                }
+                return -1;
+            }
             let match = dataString.match(/line (\d+)/g);
-            line = match?.[match.length - 1].split(' ')[1];
-            line = (sourceMap.get(parseInt(line)) ?? (line+1)) - 1;
+            line = parseInt(match?.[match.length - 1].split(' ')[1]);
+            line = (sourceMap.get(line) ?? (lookForIndex(line)+1)) - 1;
         }
         while (output.length < line) output.push(output.length + ':');
-        output.push(line+': Error: ' + dataString.trim());
+        if(line >= 0) {
+            output.push(line+': Error: ' + dataString.trim());
+        } else {
+            output.push('0: Python Prev Internal Error: ' + dataString.trim());
+        }
     });
     await new Promise<void>((resolve) => {
         setTimeout(() => {
@@ -251,7 +278,7 @@ function setKeysFromCode(map: Map<number, number>, code: string) {
     for(let i = 0, last = 1; i < lines.length; i++)
     {
         let line = lines[i];
-        if(line.trim().startsWith("print"))
+        if(line.trim().startsWith("print ") || line.trim().startsWith("print("))
         {
             line = line.split(':')[0];
             let lineNum = parseInt(line.slice(line.indexOf('"') + 1)) + 1;
@@ -274,11 +301,12 @@ function setKeysFromOutput(map: Map<number, number>, output: string[]) {
 function GeneratePython(lines: string[], lineI: number, indentation: number = 0): string {
     if (lineI >= lines.length) return '';
     const ignoreList = ["break", "continue", "pass", "except", "finally", "raise"];
+    const neverRunCheck = ["if", "elif", "else", "while", "for"];
     let line = lines[lineI];
     let continueLine = lineI;
     let additionalLines = '';
     let returnPreviously = line.trim().startsWith('return');
-    while(lines[continueLine].trim().split('#')[0].endsWith('\\')) { // all comments besides the first one are ignored
+    while(lines[continueLine].trim().split('#')[0].endsWith('\\') && continueLine < lines.length) { // all comments besides the first one are ignored
         let preComment = line.split('#')[0].split('\\')[0];
         let postComment = line.split('#')[1];
         line = preComment + lines[++continueLine].trim().split('#')[0].split('\\')[0];
@@ -286,16 +314,41 @@ function GeneratePython(lines: string[], lineI: number, indentation: number = 0)
         if(returnPreviously) line = ' '.repeat(indentation) + `print("${continueLine}:")\n` + line;
         else additionalLines += 'print("' + continueLine + ':")\n';
     }
-    continueLine++;
-    if (line.trim() === '') {
-        return ' '.repeat(indentation) + `print("${lineI}:")\n` + ' '.repeat(additionalLines.length > 0 ? indentation : 0) + additionalLines + GeneratePython(lines, continueLine, indentation);
-    }
-    if(line.match(/^\s*(?:elif|else)/))
-    {
-        return line + '\n' + ' '.repeat(indentation) + `print("${lineI}:")\n` + ' '.repeat(additionalLines.length > 0 ? indentation : 0) + additionalLines + GeneratePython(lines, continueLine, indentation);
-    }
     let checkLine = line + '';
-    line = mockInput(line, indentation, lineI, lines);
+    if(neverRunCheck.some(v => line.trimStart().startsWith(v+" ") || line.trimStart().startsWith(v+":"))) {
+        let entryIndentation = indentationFromLine(checkLine, true);
+        if(line.trim().startsWith('if') && line.trim().endsWith(':')) {
+            line = " ".repeat(entryIndentation) + `clemca_make_entry('${lineI}')\n` + line;
+            const elifLines = [];
+            let elseLine = -1;
+            let nextLine = lineI + 1;
+            while(nextLine < lines.length && getIndent(lines[nextLine]) >= entryIndentation) {
+                if(lines[nextLine].trim().startsWith('elif ')) {
+                    elifLines.push(nextLine);
+                } else if(lines[nextLine].trim().startsWith('else:')) {
+                    elseLine = nextLine;
+                }
+                nextLine++;
+            }
+            if (elifLines.length > 0)
+                line = elifLines.map(v => ' '.repeat(entryIndentation) + `clemca_make_entry('${v}')\n`).join('') + line;
+            if (elseLine !== -1)
+                line = ' '.repeat(entryIndentation) + `clemca_make_entry('${elseLine}')\n` + line;
+        }
+        else if(!line.trim().startsWith('else') && !line.trim().startsWith('elif')) {
+            line = " ".repeat(entryIndentation) + `clemca_make_entry('${lineI}')\n` + line;
+        }
+        additionalLines += `clemca_register_run('${lineI}')\n`;
+    }
+    continueLine++;
+    if (checkLine.trim() === '') {
+        return ' '.repeat(indentation) + `print("${lineI}:")\n` + additionalLines.split('\n').filter((v) => v.trim() !== "").map((v) => ' '.repeat(indentation) + v).join('\n') + (additionalLines.length > 0 ? '\n' : '') + GeneratePython(lines, continueLine, indentation);
+    }
+    if(checkLine.match(/^\s*(?:elif|else)(?::|\s)/))
+    {
+        return line + '\n' + ' '.repeat(indentation) + `print("${lineI}:")\n` + additionalLines.split('\n').filter((v) => v.trim() !== "").map((v) => ' '.repeat(indentation) + v).join('\n') + (additionalLines.length > 0 ? '\n' : '') + GeneratePython(lines, continueLine, indentation);
+    }
+    line = mockInput(line, checkLine, indentation, lineI, lines);
     if(checkLine.trimStart().startsWith("def") && line.length > checkLine.length) {
         console.log("mocked def", line);
         let endOfDef = continueLine;
@@ -307,7 +360,7 @@ function GeneratePython(lines: string[], lineI: number, indentation: number = 0)
     if (assignmentMatch) {
         // print the assignment
         indentation = indentationFromLine(checkLine);
-        return line + '\n' + ' '.repeat(indentation) + `print("${lineI}: " + str(${assignmentMatch[0].replace(/=/, '').trim()}))\n` + ' '.repeat(additionalLines.length > 0 ? indentation : 0) + additionalLines + GeneratePython(lines, continueLine, indentation);
+        return line + '\n' + ' '.repeat(indentation) + `print("${lineI}: " + str(${assignmentMatch[0].replace(/=/, '').trim()}))\n` + additionalLines.split('\n').filter((v) => v.trim() !== "").map((v) => ' '.repeat(indentation) + v).join('\n') + (additionalLines.length > 0 ? '\n' : '') + GeneratePython(lines, continueLine, indentation);
     }
     let specialAssignmentMatch = checkLine.match(/^\s*([a-zA-Z_][a-zA-Z_0-9]*)\s*([-\+\*\/])=/);
     if(specialAssignmentMatch)
@@ -316,19 +369,19 @@ function GeneratePython(lines: string[], lineI: number, indentation: number = 0)
         let operator = specialAssignmentMatch[2];
         let restOfLine = stripComments(checkLine.split('=')[1]).trim();
         indentation = indentationFromLine(checkLine);
-        return ' '.repeat(indentation) + `print("${lineI}: " + str(${variable} ${operator} (${restOfLine})))\n` + line + '\n' + ' '.repeat(additionalLines.length > 0 ? indentation : 0) + additionalLines + GeneratePython(lines, continueLine, indentation);
+        return ' '.repeat(indentation) + `print("${lineI}: " + str(${variable} ${operator} (${restOfLine})))\n` + line + '\n' + additionalLines.split('\n').filter((v) => v.trim() !== "").map((v) => ' '.repeat(indentation) + v).join('\n') + (additionalLines.length > 0 ? '\n' : '') + GeneratePython(lines, continueLine, indentation);
     }
     // line starts with print and isn't a multiline
     if (checkLine.match(/^\s*print\s*\(/) && !returnPreviously) {
         let modifiedLine = line.split("#")[0].replace(/print\s*\(/, `print("${lineI}:" + str(`) + ')';
         indentation = indentationFromLine(checkLine);
-        return modifiedLine + '\n' + ' '.repeat(additionalLines.length > 0 ? indentation : 0) + additionalLines + GeneratePython(lines, continueLine, indentation);
+        return modifiedLine + '\n' + additionalLines.split('\n').filter((v) => v.trim() !== "").map((v) => ' '.repeat(indentation) + v).join('\n') + (additionalLines.length > 0 ? '\n' : '') + GeneratePython(lines, continueLine, indentation);
     }
     // line is a for loop
     if (checkLine.match(/^\s*for/)) {
         indentation = indentationFromLine(checkLine, true);
         let afterIn = checkLine.split('in')[1].split(':')[0].trim();
-        return ' '.repeat(indentation) + `print("${lineI}:"+str(${afterIn}))\n` + line + '\n' + ' '.repeat(additionalLines.length > 0 ? indentation : 0) + additionalLines + GeneratePython(lines, continueLine, indentation + indentSize);
+        return ' '.repeat(indentation) + `print("${lineI}:"+str(${afterIn}))\n` + line + '\n' + additionalLines.split('\n').filter((v) => v.trim() !== "").map((v) => ' '.repeat(indentation + indentSize) + v).join('\n') + (additionalLines.length > 0 ? '\n' : '') + GeneratePython(lines, continueLine, indentation + indentSize);
     }
     if (checkLine.match(/^\s*return\s+/) || returnPreviously) {
         let nextIndentation = continueLine >= lines.length ? 0 : indentationFromLine(lines[continueLine], true);
@@ -336,45 +389,46 @@ function GeneratePython(lines: string[], lineI: number, indentation: number = 0)
         let afterReturn = checkLine.split('return')[1].trim();
         let beforeReturn = checkLine.split('return')[0]; // there's pregenerated stuff we want to keep
         if(afterReturn.indexOf(' ') !== -1) afterReturn = '(' + afterReturn + ')';
-        return beforeReturn + `print("${lineI}:"+str(${afterReturn}))\n` + ' '.repeat(indentation) + 'return ' + afterReturn + '\n' + ' '.repeat(additionalLines.length > 0 ? indentation : 0) + additionalLines + GeneratePython(lines, continueLine, nextIndentation);
+        return beforeReturn + `print("${lineI}:"+str(${afterReturn}))\n` + ' '.repeat(indentation) + 'return ' + afterReturn + '\n' + additionalLines.split('\n').filter((v) => v.trim() !== "").map((v) => ' '.repeat(indentation) + v).join('\n') + (additionalLines.length > 0 ? '\n' : '') + GeneratePython(lines, continueLine, nextIndentation);
     }
     if (checkLine.match(/^\s*def\s*/) && !(checkLine.split('#')[1] ?? "").match(/mock\s?\(/)) {
         indentation = indentationFromLine(checkLine);
         let parameters = checkLine.split('(')[1].split(')')[0].split(',').map(v => v.split('=')[0].split(':')[0].trim()).filter((v, i) => i !== 0 || v !== "self").filter(v => v !== '');
         let parameterStrings = parameters.map(v => ' '.repeat(indentation) + `print("${lineI}:${v}: "+str(${v}))`);
-        return line + '\n' + parameterStrings.join('\n') + '\n' + ' '.repeat(additionalLines.length > 0 ? indentation : 0) + additionalLines + GeneratePython(lines, continueLine, indentation);
+        return line + '\n' + parameterStrings.join('\n') + '\n' + additionalLines.split('\n').filter((v) => v.trim() !== "").map((v) => ' '.repeat(indentation) + v).join('\n') + (additionalLines.length > 0 ? '\n' : '') + GeneratePython(lines, continueLine, indentation);
     }
     if (endsWithColon(checkLine)) {
         if(ignoreList.some(v => checkLine.trimStart().startsWith(v+" "))) {
             indentation = indentationFromLine(checkLine);
-            return line + '\n' + GeneratePython(lines, continueLine, indentation + indentSize);
+            return line + '\n' + GeneratePython(lines, continueLine, indentation);
         }
         indentation = indentationFromLine(checkLine, true);
-        return ' '.repeat(indentation) + `print("${lineI}:")\n` + line + '\n' + ' '.repeat(additionalLines.length > 0 ? indentation : 0) + additionalLines + GeneratePython(lines, continueLine, indentation + indentSize);
+        return ' '.repeat(indentation) + `print("${lineI}:")\n` + line + '\n' + additionalLines.split('\n').filter((v) => v.trim() !== "").map((v) => ' '.repeat(indentation + indentSize) + v).join('\n') + (additionalLines.length > 0 ? '\n' : '') + GeneratePython(lines, continueLine, indentation + indentSize);
     }
     indentation = indentationFromLine(checkLine);
     if(ignoreList.some(v => checkLine.trim() === v || checkLine.trimStart().startsWith(v+" "))) {
-        return line + '\n' + GeneratePython(lines, continueLine, indentation);
+        indentation = indentationFromLine(lines[continueLine] ?? lines[lines.length - 1], false);
+        return line + '\n' + additionalLines.split('\n').filter((v) => v.trim() !== "").map((v) => ' '.repeat(indentation) + v).join('\n') + (additionalLines.length > 0 ? '\n' : '') + GeneratePython(lines, continueLine, indentation);
     }
     console.log("matched nothing for", checkLine);
-    return line + '\n' + ' '.repeat(indentation) + `print("${lineI}:")\n` + ' '.repeat(additionalLines.length > 0 ? indentation : 0) + additionalLines + GeneratePython(lines, continueLine, indentation);
+    return line + '\n' + ' '.repeat(indentation) + `print("${lineI}:")\n` + additionalLines.split('\n').filter((v) => v.trim() !== "").map((v) => ' '.repeat(indentation) + v).join('\n') + (additionalLines.length > 0 ? '\n' : '') + GeneratePython(lines, continueLine, indentation);
 }
 function stripComments(line: string) {
     return line.split('#')[0];
 }
 function indentationFromLine(line: string, ignoreColon: boolean = false) {
-    return (line.match(/^\s*/)?.[0].length ?? 0) + (ignoreColon === false && endsWithColon(line) ? indentSize : 0);
+    return getIndent(line) + (ignoreColon === false && endsWithColon(line) ? indentSize : 0);
 }
 function endsWithColon(line: string) {
     return stripComments(line).trimEnd().endsWith(':');
 }
-function mockInput(line: string, indentation: number, lineI: number, lines: string[]) {
-    if(!line.match(/\s+input\s*\(/)) return mockOrLimitLine(line, lineI, lines);
+function mockInput(line: string, checkline: string, indentation: number, lineI: number, lines: string[]) {
+    if(!checkline.match(/\s+input\s*\(/)) return line.replace(checkline, mockOrLimitLine(checkline, lineI, lines));
     let UUID = Math.random().toString(36).substring(2, 15) + Math.random().toString(36).substring(2, 15);
-    let comment = line.split('#')[1]?.trim() ?? '';
+    let comment = checkline.split('#')[1]?.trim() ?? '';
     let {mock, limit} = passComments(comment);
-    let checkCode = ' '.repeat(indentation) + `if not check_UUID_count('${UUID}', ${limit ?? 100}):\n` + ' '.repeat(indentSize + indentation) + "raise Exception('ClemExcep"+lineI+":Too many calls to input. Use a mock comment if necessary.')\n";
-    return checkCode + line.replace(/input\(.*\)/, mock ?? '""');
+    let checkCode = ' '.repeat(indentation) + `if not clemca_check_UUID_count('${UUID}', ${limit ?? 100}):\n` + ' '.repeat(indentSize + indentation) + "raise Exception('ClemExcep"+lineI+":Too many calls to input. Use a mock comment if necessary.')\n";
+    return checkCode + line.replace(checkline, checkline.replace(/input\(.*\)/, mock ?? '""'));
 }
 
 function mockOrLimitLine(line: string, lineI: number, lines: string[]) {
@@ -384,7 +438,7 @@ function mockOrLimitLine(line: string, lineI: number, lines: string[]) {
     if(!limit) return line;
     let indentation = indentationFromLine(line, true);
     let UUID = Math.random().toString(36).substring(2, 15) + Math.random().toString(36).substring(2, 15);
-    return ' '.repeat(indentation) + `if not check_UUID_count('${UUID}', ${limit}):\n` + ' '.repeat(indentSize + indentation) + "raise Exception('ClemExcep"+lineI+":Too many calls.')\n"+line;
+    return ' '.repeat(indentation) + `if not clemca_check_UUID_count('${UUID}', ${limit}):\n` + ' '.repeat(indentSize + indentation) + "raise Exception('ClemExcep"+lineI+":Too many calls.')\n"+line;
 }
 
 function mockLine(line: string, mock: string, lineI: number, lines: string[]) {
@@ -435,4 +489,13 @@ function passComments(comment: string): { limit?: number, mock?: string } {
         return { ...passComments(comment.slice(comment.indexOf(')'))), limit: parseInt(comment.slice(comment.indexOf('(')+1, comment.indexOf(')'))) };
     }
     return {};
+}
+
+function getIndent(line: string) {
+    for (let i = 0; i < line.length; i++) {
+        if (line[i] !== ' ') {
+            return i;
+        }
+    }
+    return line.length;
 }
