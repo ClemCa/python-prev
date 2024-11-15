@@ -273,6 +273,7 @@ function setKeysFromOutput(map: Map<number, number>, output: string[]) {
 }
 function GeneratePython(lines: string[], lineI: number, indentation: number = 0): string {
     if (lineI >= lines.length) return '';
+    const ignoreList = ["break", "continue", "pass", "except", "finally", "raise"];
     let line = lines[lineI];
     let continueLine = lineI;
     let additionalLines = '';
@@ -344,11 +345,18 @@ function GeneratePython(lines: string[], lineI: number, indentation: number = 0)
         return line + '\n' + parameterStrings.join('\n') + '\n' + ' '.repeat(additionalLines.length > 0 ? indentation : 0) + additionalLines + GeneratePython(lines, continueLine, indentation);
     }
     if (endsWithColon(checkLine)) {
+        if(ignoreList.some(v => checkLine.trimStart().startsWith(v+" "))) {
+            indentation = indentationFromLine(checkLine);
+            return line + '\n' + GeneratePython(lines, continueLine, indentation + indentSize);
+        }
         indentation = indentationFromLine(checkLine, true);
         return ' '.repeat(indentation) + `print("${lineI}:")\n` + line + '\n' + ' '.repeat(additionalLines.length > 0 ? indentation : 0) + additionalLines + GeneratePython(lines, continueLine, indentation + indentSize);
     }
-    console.log("matched nothing for", checkLine);
     indentation = indentationFromLine(checkLine);
+    if(ignoreList.some(v => checkLine.trim() === v || checkLine.trimStart().startsWith(v+" "))) {
+        return line + '\n' + GeneratePython(lines, continueLine, indentation);
+    }
+    console.log("matched nothing for", checkLine);
     return line + '\n' + ' '.repeat(indentation) + `print("${lineI}:")\n` + ' '.repeat(additionalLines.length > 0 ? indentation : 0) + additionalLines + GeneratePython(lines, continueLine, indentation);
 }
 function stripComments(line: string) {
