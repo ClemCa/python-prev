@@ -373,7 +373,11 @@ function GeneratePython(lines: string[], lineI: number, indentation: number = 0)
     }
     // line starts with print and isn't a multiline
     if (checkLine.match(/^\s*print\s*\(/) && !returnPreviously) {
-        let modifiedLine = line.split("#")[0].replace(/print\s*\(/, `print("${lineI}:" + str(`) + ')';
+        let modifiedLine = line.split("#")[0].replace(/print\s*\(/, `print("${lineI}:" + str(`);
+        const stridx = modifiedLine.indexOf('str(');
+        const firstComma = firstInContext(modifiedLine, ',', stridx);
+        if(firstComma !== -1) modifiedLine = modifiedLine.slice(0, firstComma) + ')' + modifiedLine.slice(firstComma);
+        else modifiedLine += ')';
         indentation = indentationFromLine(checkLine);
         return modifiedLine + '\n' + additionalLines.split('\n').filter((v) => v.trim() !== "").map((v) => ' '.repeat(indentation) + v).join('\n') + (additionalLines.length > 0 ? '\n' : '') + GeneratePython(lines, continueLine, indentation);
     }
@@ -498,4 +502,15 @@ function getIndent(line: string) {
         }
     }
     return line.length;
+}
+
+function firstInContext(text: string, char: string, from: number) {
+    let stack = 0;
+    for (let i = from; i < text.length; i++) {
+        if (text[i] in ['(', '[', '{']) stack++;
+        if (text[i] in [')', ']', '}']) stack--;
+        if (text[i] === char && stack === 0) return i;
+        if(stack < 0) return -1;
+    }
+    return -1;
 }
