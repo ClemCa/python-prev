@@ -306,16 +306,23 @@ function GeneratePython(lines: string[], lineI: number, indentation: number = 0)
     let continueLine = lineI;
     let additionalLines = '';
     let returnPreviously = line.trim().startsWith('return');
-    let openChain = checkLineForOpen(line);
+    let [openChain, inString] = checkLineForOpen(line);
     while(continueLine < lines.length && (lines[continueLine].trim().split('#')[0].endsWith('\\') || openChain > 0)) { // all comments besides the first one are ignored
-        openChain += checkLineForOpen(lines[continueLine]);
         let preComment = line.split('#')[0].split('\\')[0];
         let postComment = line.split('#')[1];
         line = preComment + lines[++continueLine].trim().split('#')[0].split('\\')[0];
         if(postComment) line += '#' + postComment;
-        if(returnPreviously) line = ' '.repeat(indentation) + `print("${continueLine}:")\n` + line;
-        else additionalLines += 'print("' + continueLine + ':")\n';
+        if(openChain > 0) {
+            let op;
+            [op, inString] = checkLineForOpen(lines[continueLine], inString);
+            openChain += op;
+            additionalLines += 'print("' + continueLine + ':")\n';
+        } else {
+            if(returnPreviously) line = ' '.repeat(indentation) + `print("${continueLine}:")\n` + line;
+            else additionalLines += 'print("' + continueLine + ':")\n';
+        }
     }
+    console.log("multiline", line, "from", lines[lineI]);
     let checkLine = line + '';
     if(neverRunCheck.some(v => line.trimStart().startsWith(v+" ") || line.trimStart().startsWith(v+":"))) {
         let entryIndentation = indentationFromLine(checkLine, true);
@@ -518,21 +525,53 @@ function firstInContext(text: string, char: string, from: number) {
 }
 
 
-function checkLineForOpen(line: string) {
+function checkLineForOpen(line: string, inString: number = 0) {
     let openChain = 0;
-    let inString = 0;
-    for(let a in line.split('#')[0].split(' ')) {
-        if(a === '') continue;
-        const match = a.match(/("|'|""")/);
-        if(match) {
-            for(let b in match) {
-                const index = ['"', "'", '"""'].indexOf(match[b]);
-                inString = inString === 0 ? index : inString === index ? 0 : inString;
-            }
-        }
-        if(inString > 0) continue;
-        if(a in ['[', '{', '(']) openChain++;
-        if(a in [']', '}', ')']) openChain--;
+    const splitString = line.split('#')[0].split('');
+    for(let i = 0; i < splitString.length; i++) {
+        if(splitString[i].trim() === '') continue;
+        let found;
+        [i, found, inString] = skipString(line, i, inString);
+        if(found) continue;
+        if(splitString[i] === '(' || splitString[i] === '[' || splitString[i] === '{') openChain++;
+        if(splitString[i] === ')' || splitString[i] === ']' || splitString[i] === '}') openChain--;
+
     }
-    return openChain;
+    if(openChain > 0)
+        console.log("open chain", openChain, "in string", inString, "from", line);
+    return [openChain, inString];
+}
+
+function skipString(line: string, index: number, inString: number): [number, boolean, number] {
+    if(inString === 0 && line[index] !== '"' && line[index] !== "'") return [index, false, 0];
+    if(inString === 3 || (inString === 0 && line[index] === '"' && line[index+1] === '"'))
+    {
+        if(inString === 3 || line[index+2] === '"') {
+            let targetIndex = line.indexOf('"""', index+3-inString);
+            while(targetIndex !== -1 && line[targetIndex-1] === '\\'){
+                targetIndex = line.indexOf('"""', targetIndex+3);
+            }
+            if(targetIndex === -1) return [line.length, true, 3];
+            return [line.indexOf('"""', targetIndex+2), true, 0];
+        };
+        return [index+2, true, 0];
+    }
+    if(inString === 2 || (inString === 0 && line[index] === '"')) {
+        let targetIndex = line.indexOf('"', index+(inString === 2 ? 0 : 1));
+        while(targetIndex !== -1 && line[targetIndex-1] === '\\'){
+            targetIndex = line.indexOf('"', targetIndex+1);
+        }
+        if(targetIndex === -1) return [line.length, true, 2];
+        return [line.indexOf('"', targetIndex), true, 0];
+    }
+    if(inString === 1 || line[index] === "'")
+    {
+        let targetIndex = line.indexOf("'", index+1 - inString);
+        while(targetIndex !== -1 && line[targetIndex-1] === '\\'){
+            targetIndex = line.indexOf("'", targetIndex+1);
+        }
+        if(targetIndex === -1) return [line.length, true, 1];
+        return [line.indexOf("'", targetIndex), true, 0];
+    }
+    throw new Error("Shouldn't ever happen");
 }
