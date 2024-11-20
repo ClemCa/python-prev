@@ -306,7 +306,9 @@ function GeneratePython(lines: string[], lineI: number, indentation: number = 0)
     let continueLine = lineI;
     let additionalLines = '';
     let returnPreviously = line.trim().startsWith('return');
-    while(lines[continueLine].trim().split('#')[0].endsWith('\\') && continueLine < lines.length) { // all comments besides the first one are ignored
+    let openChain = checkLineForOpen(line);
+    while(continueLine < lines.length && (lines[continueLine].trim().split('#')[0].endsWith('\\') || openChain > 0)) { // all comments besides the first one are ignored
+        openChain += checkLineForOpen(lines[continueLine]);
         let preComment = line.split('#')[0].split('\\')[0];
         let postComment = line.split('#')[1];
         line = preComment + lines[++continueLine].trim().split('#')[0].split('\\')[0];
@@ -513,4 +515,24 @@ function firstInContext(text: string, char: string, from: number) {
         if(stack < 0) return -1;
     }
     return -1;
+}
+
+
+function checkLineForOpen(line: string) {
+    let openChain = 0;
+    let inString = 0;
+    for(let a in line.split('#')[0].split(' ')) {
+        if(a === '') continue;
+        const match = a.match(/("|'|""")/);
+        if(match) {
+            for(let b in match) {
+                const index = ['"', "'", '"""'].indexOf(match[b]);
+                inString = inString === 0 ? index : inString === index ? 0 : inString;
+            }
+        }
+        if(inString > 0) continue;
+        if(a in ['[', '{', '(']) openChain++;
+        if(a in [']', '}', ')']) openChain--;
+    }
+    return openChain;
 }
