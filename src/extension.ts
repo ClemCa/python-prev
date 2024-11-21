@@ -303,6 +303,9 @@ function GeneratePython(lines: string[], lineI: number, indentation: number = 0)
     const ignoreList = ["break", "continue", "pass", "except", "finally", "raise"];
     const neverRunCheck = ["if", "elif", "else", "while", "for"];
     let line = lines[lineI];
+    if(line.trimStart().startsWith('@')) {
+        return line + '\n' + GeneratePython(lines, lineI + 1, indentation);
+    }
     let continueLine = lineI;
     let additionalLines = '';
     let returnPreviously = line.trim().startsWith('return');
@@ -322,7 +325,6 @@ function GeneratePython(lines: string[], lineI: number, indentation: number = 0)
             else additionalLines += 'print("' + continueLine + ':")\n';
         }
     }
-    console.log("multiline", line, "from", lines[lineI]);
     let checkLine = line + '';
     if(neverRunCheck.some(v => line.trimStart().startsWith(v+" ") || line.trimStart().startsWith(v+":"))) {
         let entryIndentation = indentationFromLine(checkLine, true);
