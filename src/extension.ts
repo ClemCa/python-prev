@@ -42,13 +42,13 @@ export function activate(context: vscode.ExtensionContext) {
     context.subscriptions.push(vscode.languages.registerHoverProvider('python', {
         async provideHover(document, position, token) {
             let state = workspaceMemento.get(document.fileName) || [];
-            let line = position.line;
-            if(state.length <= line) return;
-            let hoverText = state[line];
+            const line = state.findIndex(v => v.startsWith(position.line + ':'));
+            if(line === -1) return;
+            let hoverText = state[line].substring(state[line].indexOf(':')+1).trim();
             let lineLength = document.lineAt(line).text.length;
             if(position.character < lineLength) return;
             if(position.character > lineLength + hoverText.split('\n')[0].length + 10) return;
-            return { contents: [hoverText] };
+            return { contents: hoverText.split('\n') };
         }
     }));
     if(vscode.window.activeTextEditor && vscode.window.activeTextEditor.document.languageId === 'python')
@@ -89,6 +89,7 @@ async function previewRun(change: vscode.TextDocumentChangeEvent | { document: v
         let isCurrent = currentCursorLine === mappedLine;
         let stateLine = state[i].substring(state[i].indexOf(':')+1).trim();
         if(stateLine === '') continue;
+        stateLine = stateLine.replaceAll('\n', '\\n');
         console.log("mapped line", mappedLine, "stateline:", stateLine,"from", state[i]);
         displayInline(mappedLine, stateLine, isError ? isCurrent ? DecorationMode.activeError : DecorationMode.error : isCurrent ? DecorationMode.active : DecorationMode.regular, decorations);
     }
@@ -126,7 +127,17 @@ atexit.register(clemca_exit_handler)\n`;
     let childProcess = child.spawn('python', ['-c', pythonCode]);
     let output = [] as string[];
     childProcess.stdout.on('data', (data) => {
-        output.push(...(data.toString() as string).split(/\r?\n/).map(v => v.trim()).filter(v => v !== ''));
+        output.push(...(data.toString() as string).split(/\r?\n(\d+:)/).reduce((acc, v, i) => {
+            // might have line returns in print, we don't escape lines matching our format but we might want to do it in the future
+            // it does require going out of your way to print \nd+: so the line number tacked on isn't on the same line
+            // so at this point it's a feature
+            if(i === 0 || v.match(/^\d+:$/)){
+                acc.push(v);
+                return acc;
+            }
+            acc[acc.length - 1] += v;
+            return acc;
+        }, [] as string[]).map(v => v.trim()).filter(v => v !== ''));
     });
     childProcess.stderr.on('data', (data) => {
         let dataString = data.toString();
@@ -310,12 +321,13 @@ function GeneratePython(lines: string[], lineI: number, indentation: number = 0)
     let additionalLines = '';
     let returnPreviously = line.trim().startsWith('return');
     let [openChain, inString] = checkLineForOpen(line);
-    while(continueLine < lines.length && (lines[continueLine].trim().split('#')[0].endsWith('\\') || openChain > 0)) { // all comments besides the first one are ignored
+    console.log("before open chain", inString, openChain, line, continueLine);
+    while(continueLine < lines.length && (lines[continueLine].trim().split('#')[0].endsWith('\\') || openChain > 0 || inString > 0)) { // all comments besides the first one are ignored
         let preComment = line.split('#')[0].split('\\')[0];
         let postComment = line.split('#')[1];
-        line = preComment + lines[++continueLine].trim().split('#')[0].split('\\')[0];
+        line = preComment + (inString > 0 ? "\n"+lines[++continueLine].split('#')[0].split('\\')[0] : lines[++continueLine].trim().split('#')[0].split('\\')[0]);
         if(postComment) line += '#' + postComment;
-        if(openChain > 0) {
+        if(openChain > 0 || inString > 0) {
             let op;
             [op, inString] = checkLineForOpen(lines[continueLine], inString);
             openChain += op;
@@ -325,6 +337,7 @@ function GeneratePython(lines: string[], lineI: number, indentation: number = 0)
             else additionalLines += 'print("' + continueLine + ':")\n';
         }
     }
+    console.log("out of open chain", inString, openChain, line, continueLine);
     let checkLine = line + '';
     if(neverRunCheck.some(v => line.trimStart().startsWith(v+" ") || line.trimStart().startsWith(v+":"))) {
         let entryIndentation = indentationFromLine(checkLine, true);
@@ -537,7 +550,6 @@ function checkLineForOpen(line: string, inString: number = 0) {
         if(found) continue;
         if(splitString[i] === '(' || splitString[i] === '[' || splitString[i] === '{') openChain++;
         if(splitString[i] === ')' || splitString[i] === ']' || splitString[i] === '}') openChain--;
-
     }
     if(openChain > 0)
         console.log("open chain", openChain, "in string", inString, "from", line);
@@ -554,26 +566,26 @@ function skipString(line: string, index: number, inString: number): [number, boo
                 targetIndex = line.indexOf('"""', targetIndex+3);
             }
             if(targetIndex === -1) return [line.length, true, 3];
-            return [line.indexOf('"""', targetIndex+2), true, 0];
+            return [targetIndex+3, true, 0];
         };
         return [index+2, true, 0];
     }
     if(inString === 2 || (inString === 0 && line[index] === '"')) {
-        let targetIndex = line.indexOf('"', index+(inString === 2 ? 0 : 1));
-        while(targetIndex !== -1 && line[targetIndex-1] === '\\'){
+        let targetIndex = line.indexOf('"', inString === 2 ? index : index+1);
+        while(targetIndex === -1 || line[targetIndex-1] === '\\'){
             targetIndex = line.indexOf('"', targetIndex+1);
         }
         if(targetIndex === -1) return [line.length, true, 2];
-        return [line.indexOf('"', targetIndex), true, 0];
+        return [targetIndex+1, true, 0];
     }
     if(inString === 1 || line[index] === "'")
     {
-        let targetIndex = line.indexOf("'", index+1 - inString);
-        while(targetIndex !== -1 && line[targetIndex-1] === '\\'){
+        let targetIndex = line.indexOf("'", index+1-inString);
+        while(targetIndex === -1 || line[targetIndex-1] === '\\'){
             targetIndex = line.indexOf("'", targetIndex+1);
         }
         if(targetIndex === -1) return [line.length, true, 1];
-        return [line.indexOf("'", targetIndex), true, 0];
+        return [targetIndex+1, true, 0];
     }
     throw new Error("Shouldn't ever happen");
 }
