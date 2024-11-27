@@ -13,6 +13,8 @@ let earliestError = Infinity;
 let indentSize = 4;
 let sourceMap = new Map<number, number>();
 
+let cancelTokens: Map<string, vscode.CancellationTokenSource> = new Map<string, vscode.CancellationTokenSource>();
+
 enum DecorationMode {
     regular,
     active,
@@ -66,10 +68,16 @@ export function deactivate(context: vscode.ExtensionContext) {
 async function previewRun(change: vscode.TextDocumentChangeEvent | { document: vscode.TextDocument, contentChanges: vscode.TextDocumentContentChangeEvent[] }) {
     if (change.document.languageId !== 'python') return; // just in case the type changed midway through
     let fileName = change.document.fileName;
+    if(cancelTokens.has(fileName)) cancelTokens.get(fileName)?.cancel();
+    let cancelToken = new vscode.CancellationTokenSource();
+    cancelTokens.set(fileName, cancelToken);
     let state = workspaceMemento.get(fileName) || [];
     if(change.contentChanges.length > 0 || state.length === 0)
     {
-        let results = await runPython(change.document.getText());
+        let results = await runPython(change.document.getText(), cancelToken.token);
+        if(cancelToken.token.isCancellationRequested) {
+            cancelToken.dispose(); // will be replaced by the next run, no need to delete it from the map
+        }
         indentSize = vscode.workspace.getConfiguration('editor').get('tabSize') as number;
         earliestError = results.findIndex(r => r.startsWith('Error: '));
         if(earliestError === -1) earliestError = Infinity;
@@ -94,9 +102,11 @@ async function previewRun(change: vscode.TextDocumentChangeEvent | { document: v
         displayInline(mappedLine, stateLine, isError ? isCurrent ? DecorationMode.activeError : DecorationMode.error : isCurrent ? DecorationMode.active : DecorationMode.regular, decorations);
     }
     vscode.window.activeTextEditor.setDecorations(decorationType, decorations);
+    cancelToken.dispose();
+    cancelTokens.delete(fileName);
 }
 
-async function runPython(documentText: string) {
+async function runPython(documentText: string, cancelToken: vscode.CancellationToken) {
     let lines = documentText.split(/\r?\n/);
     let pythonStarterCode =
 `clemca_python_prev_loop_dict = {}
@@ -126,7 +136,12 @@ atexit.register(clemca_exit_handler)\n`;
     console.log("generated python code", pythonCode, "with source map", sourceMap);
     let childProcess = child.spawn('python', ['-c', pythonCode]);
     let output = [] as string[];
+    function kill() {
+        if(childProcess.killed) return;
+        childProcess.kill();
+    }
     childProcess.stdout.on('data', (data) => {
+        if(cancelToken.isCancellationRequested) return kill();
         output.push(...(data.toString() as string).split(/\r?\n(\d+:)/).reduce((acc, v, i) => {
             // might have line returns in print, we don't escape lines matching our format but we might want to do it in the future
             // it does require going out of your way to print \nd+: so the line number tacked on isn't on the same line
@@ -140,6 +155,7 @@ atexit.register(clemca_exit_handler)\n`;
         }, [] as string[]).map(v => v.trim()).filter(v => v !== ''));
     });
     childProcess.stderr.on('data', (data) => {
+        if(cancelToken.isCancellationRequested) return kill();
         let dataString = data.toString();
         let line = dataString.match(/ClemExcep(\d+):/)?.[1];
         if(line)
@@ -167,8 +183,9 @@ atexit.register(clemca_exit_handler)\n`;
             output.push('0: Python Prev Internal Error: ' + dataString.trim());
         }
     });
-    await new Promise<void>((resolve) => {
-        setTimeout(() => {
+    await new Promise<void>((resolve, reject) => {
+        const timeout = setTimeout(() => {
+            if(cancelToken.isCancellationRequested) reject();
             childProcess.kill();
             if(output.length > 0)
             {
@@ -190,9 +207,12 @@ atexit.register(clemca_exit_handler)\n`;
                 childProcess.stderr.removeAllListeners();
                 childProcess.removeAllListeners();
             }
+            clearTimeout(timeout);
+            if(cancelToken.isCancellationRequested) reject();
             resolve();
         });
-    });
+    }).catch((_) => {});
+    if(cancelToken.isCancellationRequested) return [];
     output = Fuse(output);
     console.log("Fused", output);
     setKeysFromOutput(sourceMap, output);
