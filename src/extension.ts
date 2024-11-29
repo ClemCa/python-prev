@@ -342,7 +342,7 @@ function GeneratePython(lines: string[], lineI: number, indentation: number = 0)
     let returnPreviously = line.trim().startsWith('return');
     let [openChain, inString] = checkLineForOpen(line);
     console.log("before open chain", inString, openChain, line, continueLine);
-    while(continueLine < lines.length && (lines[continueLine].trim().split('#')[0].endsWith('\\') || openChain > 0 || inString > 0)) { // all comments besides the first one are ignored
+    while(continueLine < lines.length - 1 && (lines[continueLine].trim().split('#')[0].endsWith('\\') || openChain > 0 || inString > 0)) { // all comments besides the first one are ignored
         let preComment = line.split('#')[0].split('\\')[0];
         let postComment = line.split('#')[1];
         line = preComment + (inString > 0 ? "\n"+lines[++continueLine].split('#')[0].split('\\')[0] : lines[++continueLine].trim().split('#')[0].split('\\')[0]);
