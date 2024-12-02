@@ -567,7 +567,7 @@ function checkLineForOpen(line: string, inString: number = 0) {
         if(splitString[i].trim() === '') continue;
         let found;
         [i, found, inString] = skipString(line, i, inString);
-        if(found) continue;
+        if(inString > 0) continue;
         if(splitString[i] === '(' || splitString[i] === '[' || splitString[i] === '{') openChain++;
         if(splitString[i] === ')' || splitString[i] === ']' || splitString[i] === '}') openChain--;
     }
