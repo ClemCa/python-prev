@@ -418,8 +418,7 @@ function GeneratePython(lines: string[], lineI: number, indentation: number = 0)
     // line starts with print and isn't a multiline
     if (checkLine.match(/^\s*print\s*\(/) && !returnPreviously) {
         let modifiedLine = line.split("#")[0].replace(/print\s*\(/, `print("${lineI}:" + str(`);
-        const stridx = modifiedLine.indexOf('str(');
-        const firstComma = firstInContext(modifiedLine, ',', stridx);
+        const firstComma = firstInContext(modifiedLine, ',', modifiedLine.indexOf('str(')+4);
         if(firstComma !== -1) modifiedLine = modifiedLine.slice(0, firstComma) + ')' + modifiedLine.slice(firstComma);
         else modifiedLine += ')';
         indentation = indentationFromLine(checkLine);
@@ -551,8 +550,9 @@ function getIndent(line: string) {
 function firstInContext(text: string, char: string, from: number) {
     let stack = 0;
     for (let i = from; i < text.length; i++) {
-        if (text[i] in ['(', '[', '{']) stack++;
-        if (text[i] in [')', ']', '}']) stack--;
+        [i] = skipString(text, i, 0);
+        if (['(', '[', '{'].includes(text[i])) stack++;
+        if ([')', ']', '}'].includes(text[i])) stack--;
         if (text[i] === char && stack === 0) return i;
         if(stack < 0) return -1;
     }
