@@ -447,8 +447,10 @@ function GeneratePython(lines: string[], lineI: number, indentation: number = 0)
     }
     if (checkLine.match(/^\s*def\s*/) && !(checkLine.split('#')[1] ?? "").match(/mock\s?\(/)) {
         indentation = indentationFromLine(checkLine);
+        // as stupid as this is for a language with strict indentation, indentation for the next line can be more than required and be valid
+        const nextLineIndentation = indentationFromLine(lines[continueLine], true);
         let parameters = checkLine.split('(')[1].split(')')[0].split(',').map(v => v.split('=')[0].split(':')[0].trim()).filter((v, i) => i !== 0 || v !== "self").filter(v => v !== '');
-        let parameterStrings = parameters.map(v => ' '.repeat(indentation) + `print("${lineI}:${v}: "+str(${v}))`);
+        let parameterStrings = parameters.map(v => ' '.repeat(nextLineIndentation > indentation ? nextLineIndentation : indentation) + `print("${lineI}:${v}: "+str(${v}))`);
         return line + '\n' + parameterStrings.join('\n') + '\n' + additionalLines.split('\n').filter((v) => v.trim() !== "").map((v) => ' '.repeat(indentation) + v).join('\n') + (additionalLines.length > 0 ? '\n' : '') + GeneratePython(lines, continueLine, indentation);
     }
     if (endsWithColon(checkLine)) {
