@@ -434,7 +434,7 @@ function GeneratePython(lines: string[], lineI: number, indentation: number = 0)
     // line is a for loop
     if (checkLine.match(/^\s*for/)) {
         indentation = indentationFromLine(checkLine, true);
-        let afterIn = checkLine.split('in')[1].split(':')[0].trim();
+        let afterIn = splitUpTo(checkLine, ' in ', 1)[1].split(':')[0].trim();
         return ' '.repeat(indentation) + `print("${lineI}:"+str(${afterIn}))\n` + line + '\n' + additionalLines.split('\n').filter((v) => v.trim() !== "").map((v) => ' '.repeat(indentation + indentSize) + v).join('\n') + (additionalLines.length > 0 ? '\n' : '') + GeneratePython(lines, continueLine, indentation + indentSize);
     }
     if (checkLine.match(/^\s*return\s+/) || returnPreviously) {
