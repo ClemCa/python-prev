@@ -419,8 +419,15 @@ function GeneratePython(lines: string[], lineI: number, indentation: number = 0)
     if (checkLine.match(/^\s*print\s*\(/) && !returnPreviously) {
         let modifiedLine = line.split("#")[0].replace(/print\s*\(/, `print("${lineI}:" + str(`);
         const firstComma = firstInContext(modifiedLine, ',', modifiedLine.indexOf('str(')+4);
-        if(firstComma !== -1) modifiedLine = modifiedLine.slice(0, firstComma) + ')' + modifiedLine.slice(firstComma);
-        else modifiedLine += ')';
+        let i = line.indexOf('print(')+5;
+        while(i < line.length && line[i++] === ' ');
+        if(line[i] === '*') { // spread operator
+            modifiedLine = `print("${lineI}:", end="")\n` + line;
+        } else {
+            if(firstComma !== -1)
+                modifiedLine = modifiedLine.slice(0, firstComma) + ')' + modifiedLine.slice(firstComma);
+            else modifiedLine += ')';
+        }
         indentation = indentationFromLine(checkLine);
         return modifiedLine + '\n' + additionalLines.split('\n').filter((v) => v.trim() !== "").map((v) => ' '.repeat(indentation) + v).join('\n') + (additionalLines.length > 0 ? '\n' : '') + GeneratePython(lines, continueLine, indentation);
     }
