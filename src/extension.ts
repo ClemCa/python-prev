@@ -417,19 +417,9 @@ function GeneratePython(lines: string[], lineI: number, indentation: number = 0)
     }
     // line starts with print and isn't a multiline
     if (checkLine.match(/^\s*print\s*\(/) && !returnPreviously) {
-        let modifiedLine = line.split("#")[0].replace(/print\s*\(/, `print("${lineI}:" + str(`);
-        const firstComma = firstInContext(modifiedLine, ',', modifiedLine.indexOf('str(')+4);
-        let i = line.indexOf('print(')+5;
-        while(i < line.length && line[i++] === ' ');
-        if(line[i] === '*') { // spread operator
-            modifiedLine = `print("${lineI}:", end="")\n` + line;
-        } else {
-            if(firstComma !== -1)
-                modifiedLine = modifiedLine.slice(0, firstComma) + ')' + modifiedLine.slice(firstComma);
-            else modifiedLine += ')';
-        }
+        let modifiedLine =  `print("${lineI}:", end="")\n` + line;
         indentation = indentationFromLine(checkLine);
-        return modifiedLine + '\n' + additionalLines.split('\n').filter((v) => v.trim() !== "").map((v) => ' '.repeat(indentation) + v).join('\n') + (additionalLines.length > 0 ? '\n' : '') + GeneratePython(lines, continueLine, indentation);
+        return ' '.repeat(indentation) + modifiedLine + '\n' + additionalLines.split('\n').filter((v) => v.trim() !== "").map((v) => ' '.repeat(indentation) + v).join('\n') + (additionalLines.length > 0 ? '\n' : '') + GeneratePython(lines, continueLine, indentation);
     }
     // line is a for loop
     if (checkLine.match(/^\s*for/)) {
@@ -449,8 +439,9 @@ function GeneratePython(lines: string[], lineI: number, indentation: number = 0)
         indentation = indentationFromLine(checkLine);
         // as stupid as this is for a language with strict indentation, indentation for the next line can be more than required and be valid
         const nextLineIndentation = indentationFromLine(lines[continueLine], true);
-        let parameters = checkLine.split('(')[1].split(')')[0].split(',').map(v => v.split('=')[0].split(':')[0].trim()).filter((v, i) => i !== 0 || v !== "self").filter(v => v !== '');
-        let parameterStrings = parameters.map(v => ' '.repeat(nextLineIndentation > indentation ? nextLineIndentation : indentation) + `print("${lineI}:${v}: "+str(${v}))`);
+        let parameters = checkLine.split('(')[1].split(')')[0].split(',').map(v => v.split('=')[0].split(':')[0].trim()).map(v => v.startsWith("*") ? v.replace(/^\**/, "") : v).filter((v, i) => i !== 0 || v !== "self").filter(v => v !== '');
+        const indent = ' '.repeat(nextLineIndentation > indentation ? nextLineIndentation : indentation);
+        let parameterStrings = parameters.map(v => indent + `print("${lineI}:${v}: ", end="")\n${indent}print(${v})`);
         return line + '\n' + parameterStrings.join('\n') + '\n' + additionalLines.split('\n').filter((v) => v.trim() !== "").map((v) => ' '.repeat(indentation) + v).join('\n') + (additionalLines.length > 0 ? '\n' : '') + GeneratePython(lines, continueLine, indentation);
     }
     if (endsWithColon(checkLine)) {
