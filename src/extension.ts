@@ -140,9 +140,17 @@ atexit.register(clemca_exit_handler)\n`;
         if(childProcess.killed) return;
         childProcess.kill();
     }
+    let lastEndedbyNewline = true;
     childProcess.stdout.on('data', (data) => {
         if(cancelToken.isCancellationRequested) return kill();
-        output.push(...(data.toString() as string).split(/\r?\n(\d+:)/).reduce((acc, v, i) => {
+        let strData = (data.toString() as string);
+        if(!lastEndedbyNewline) {
+            output[output.length - 1] += strData.split(/\r?\n/)[0];
+            strData = strData.slice(strData.indexOf('\n')+1);
+            if(strData === '') return;
+        }
+        lastEndedbyNewline = strData.endsWith('\r?\n');
+        output.push(...strData.split(/\r?\n(\d+:)/).reduce((acc, v, i) => {
             // might have line returns in print, we don't escape lines matching our format but we might want to do it in the future
             // it does require going out of your way to print \nd+: so the line number tacked on isn't on the same line
             // so at this point it's a feature
@@ -470,12 +478,13 @@ function endsWithColon(line: string) {
     return stripComments(line).trimEnd().endsWith(':');
 }
 function mockInput(line: string, checkline: string, indentation: number, lineI: number, lines: string[]) {
-    if(!checkline.match(/\s+input\s*\(/)) return line.replace(checkline, mockOrLimitLine(checkline, lineI, lines));
+    if(!checkline.match(/(?:[^a-zA-Z0-9_]|^)input\s*\(/)) return line.replace(checkline, mockOrLimitLine(checkline, lineI, lines));
     let UUID = Math.random().toString(36).substring(2, 15) + Math.random().toString(36).substring(2, 15);
     let comment = checkline.split('#')[1]?.trim() ?? '';
     let {mock, limit} = passComments(comment);
     let checkCode = ' '.repeat(indentation) + `if not clemca_check_UUID_count('${UUID}', ${limit ?? 100}):\n` + ' '.repeat(indentSize + indentation) + "raise Exception('ClemExcep"+lineI+":Too many calls to input. Use a mock comment if necessary.')\n";
-    return checkCode + line.replace(checkline, checkline.replace(/input\(.*\)/, mock ?? '""'));
+    const pattern = /(?<![a-zA-Z0-9_])input\s*\((.*?)\)/; // thx chatgpt I have no idea why this works when a non-capturing group without a lookbehind doesn't
+    return checkCode + line.replace(checkline, checkline.replace(pattern, mock ?? '""'));
 }
 
 function mockOrLimitLine(line: string, lineI: number, lines: string[]) {
