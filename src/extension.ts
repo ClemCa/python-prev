@@ -453,7 +453,10 @@ function GeneratePython(lines: string[], lineI: number, indentation: number = 0)
         return line + '\n' + parameterStrings.join('\n') + '\n' + additionalLines.split('\n').filter((v) => v.trim() !== "").map((v) => ' '.repeat(indentation) + v).join('\n') + (additionalLines.length > 0 ? '\n' : '') + GeneratePython(lines, continueLine, indentation);
     }
     if (endsWithColon(checkLine)) {
-        if(ignoreList.some(v => checkLine.trimStart().startsWith(v+" "))) {
+        if(ignoreList.some(v => {
+            const trimmed = checkLine.trimStart();
+            return trimmed.startsWith(v + ' ') || trimmed.startsWith(v + ':');
+        })) {
             indentation = indentationFromLine(checkLine);
             return line + '\n' + GeneratePython(lines, continueLine, indentation);
         }
