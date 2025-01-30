@@ -339,7 +339,8 @@ function setKeysFromOutput(map: Map<number, number>, output: string[]) {
 }
 function GeneratePython(lines: string[], lineI: number, indentation: number = 0): string {
     if (lineI >= lines.length) return '';
-    const ignoreList = ["break", "continue", "pass", "except", "finally", "raise"];
+    console.log("generate python for", lineI, lines[lineI]);
+    const ignoreList = ["break", "continue", "pass", "except", "finally", "raise", "elif", "else"]; // added elif and else for the inline case
     const neverRunCheck = ["if", "elif", "else", "while", "for"];
     let line = lines[lineI];
     if(line.trimStart().startsWith('@')) {
@@ -396,11 +397,12 @@ function GeneratePython(lines: string[], lineI: number, indentation: number = 0)
     if (checkLine.trim() === '') {
         return ' '.repeat(indentation) + `print("${lineI}:")\n` + additionalLines.split('\n').filter((v) => v.trim() !== "").map((v) => ' '.repeat(indentation) + v).join('\n') + (additionalLines.length > 0 ? '\n' : '') + GeneratePython(lines, continueLine, indentation);
     }
-    if(checkLine.match(/^\s*(?:elif|else)(?::|\s)/))
+    if(checkLine.match(/^\s*(?:elif|else)(?::|\s)$/))
     {
         return line + '\n' + ' '.repeat(indentation) + `print("${lineI}:")\n` + additionalLines.split('\n').filter((v) => v.trim() !== "").map((v) => ' '.repeat(indentation) + v).join('\n') + (additionalLines.length > 0 ? '\n' : '') + GeneratePython(lines, continueLine, indentation);
     }
     line = mockInput(line, checkLine, indentation, lineI, lines);
+    console.log("checkline", checkLine);
     if(checkLine.trimStart().startsWith("def") && line.length > checkLine.length) {
         console.log("mocked def", line);
         let endOfDef = continueLine;
@@ -452,16 +454,29 @@ function GeneratePython(lines: string[], lineI: number, indentation: number = 0)
         let parameterStrings = parameters.map(v => indent + `print("${lineI}:${v}: ", end="")\n${indent}print(${v})`);
         return line + '\n' + parameterStrings.join('\n') + '\n' + additionalLines.split('\n').filter((v) => v.trim() !== "").map((v) => ' '.repeat(indentation) + v).join('\n') + (additionalLines.length > 0 ? '\n' : '') + GeneratePython(lines, continueLine, indentation);
     }
-    if (endsWithColon(checkLine)) {
+    function treatColon(check: string) {
+        console.log("treat colon", check);
         if(ignoreList.some(v => {
-            const trimmed = checkLine.trimStart();
+            const trimmed = check.trimStart();
             return trimmed.startsWith(v + ' ') || trimmed.startsWith(v + ':');
         })) {
-            indentation = indentationFromLine(checkLine);
-            return line + '\n' + GeneratePython(lines, continueLine, indentation);
+            console.log("some line", check);
+            indentation = indentationFromLine(check);
+            return check + '\n';
         }
-        indentation = indentationFromLine(checkLine, true);
-        return ' '.repeat(indentation) + `print("${lineI}:")\n` + line + '\n' + additionalLines.split('\n').filter((v) => v.trim() !== "").map((v) => ' '.repeat(indentation + indentSize) + v).join('\n') + (additionalLines.length > 0 ? '\n' : '') + GeneratePython(lines, continueLine, indentation + indentSize);
+        indentation = indentationFromLine(check, true);
+        return ' '.repeat(indentation) + `print("${lineI}:")\n` + check + '\n' + additionalLines.split('\n').filter((v) => v.trim() !== "").map((v) => ' '.repeat(indentation + indentSize) + v).join('\n')+  (additionalLines.length > 0 ? '\n' : '')
+    }
+    if (endsWithColon(checkLine)) {
+        return treatColon(checkLine) + (additionalLines.length > 0 ? '\n' : '')  + GeneratePython(lines, continueLine, indentation + indentSize);
+    }
+    const split = splitByColon(checkLine);
+    if(split) {
+        console.log("split by colon", split);
+        let res = treatColon(split[0]);
+        res += ' '.repeat(indentation) + split[1] + '\n';
+        console.log("res after split", res);
+        return res + GeneratePython(lines, continueLine, indentation + indentSize);
     }
     indentation = indentationFromLine(checkLine);
     if(ignoreList.some(v => checkLine.trim() === v || checkLine.trimStart().startsWith(v+" "))) {
@@ -479,6 +494,33 @@ function indentationFromLine(line: string, ignoreColon: boolean = false) {
 }
 function endsWithColon(line: string) {
     return stripComments(line).trimEnd().endsWith(':');
+}
+function splitByColon(line: string) {
+    // check colon in context 0 (eg else: something, not something[:2])
+    const stripped = stripComments(line);
+    console.log("split checking", stripped);
+    let stack = 0;
+    for(let i = 0; i < stripped.length; i++) {
+        switch(stripped[i]) {
+            case '(':
+            case '[':
+            case '{':
+                stack++;
+                break;
+            case ')':
+            case ']':
+            case '}':
+                stack--;
+                break;
+            case "'":
+            case '"':
+                [i] = skipString(stripped, i, 0);
+                break;
+            case ':':
+                if(stack === 0) return [stripped.slice(0, i+1), stripped.slice(i+1).trim()];
+        }
+    }
+    return null;
 }
 function mockInput(line: string, checkline: string, indentation: number, lineI: number, lines: string[]) {
     if(!checkline.match(/(?:[^a-zA-Z0-9_]|^)input\s*\(/)) return line.replace(checkline, mockOrLimitLine(checkline, lineI, lines));
