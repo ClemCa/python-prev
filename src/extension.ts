@@ -47,7 +47,7 @@ export function activate(context: vscode.ExtensionContext) {
             const line = state.findIndex(v => v.startsWith(position.line + ':'));
             if(line === -1) return;
             let hoverText = state[line].substring(state[line].indexOf(':')+1).trim();
-            let lineLength = document.lineAt(line).text.length;
+            let lineLength = document.lineAt(position.line).text.length;
             if(position.character < lineLength) return;
             if(position.character > lineLength + hoverText.split('\n')[0].length + 10) return;
             return { contents: hoverText.split('\n') };
@@ -425,6 +425,14 @@ function GeneratePython(lines: string[], lineI: number, indentation: number = 0)
         indentation = indentationFromLine(checkLine);
         return ' '.repeat(indentation) + `print("${lineI}: " + str(${variable} ${operator} (${restOfLine})))\n` + line + '\n' + additionalLines.split('\n').filter((v) => v.trim() !== "").map((v) => ' '.repeat(indentation) + v).join('\n') + (additionalLines.length > 0 ? '\n' : '') + GeneratePython(lines, continueLine, indentation);
     }
+    let typedAssignmentMatch = checkLine.match(/^\s*([a-zA-Z_][a-zA-Z_0-9]*)\s*:\s*([a-zA-Z_].*)\s*=/);
+    if(typedAssignmentMatch)
+    {
+        console.log("typed assignment", checkLine);
+        let variable = typedAssignmentMatch[1];
+        indentation = indentationFromLine(checkLine);
+        return line + '\n' + ' '.repeat(indentation) + `print("${lineI}: " + str(${typedAssignmentMatch[1].trim()}))\n` + additionalLines.split('\n').filter((v) => v.trim() !== "").map((v) => ' '.repeat(indentation) + v).join('\n') + (additionalLines.length > 0 ? '\n' : '') + GeneratePython(lines, continueLine, indentation);
+    }
     // line starts with print and isn't a multiline
     if (checkLine.match(/^\s*print\s*\(/) && !returnPreviously) {
         let modifiedLine =  `print("${lineI}:", end="")\n` + line;
@@ -454,29 +462,29 @@ function GeneratePython(lines: string[], lineI: number, indentation: number = 0)
         let parameterStrings = parameters.map(v => indent + `print("${lineI}:${v}: ", end="")\n${indent}print(${v})`);
         return line + '\n' + parameterStrings.join('\n') + '\n' + additionalLines.split('\n').filter((v) => v.trim() !== "").map((v) => ' '.repeat(indentation) + v).join('\n') + (additionalLines.length > 0 ? '\n' : '') + GeneratePython(lines, continueLine, indentation);
     }
-    function treatColon(check: string) {
+    function treatColon(check: string, lineToUse: string) {
         console.log("treat colon", check);
         if(ignoreList.some(v => {
             const trimmed = check.trimStart();
             return trimmed.startsWith(v + ' ') || trimmed.startsWith(v + ':');
         })) {
-            console.log("some line", check);
+            console.log("some line", lineToUse);
             indentation = indentationFromLine(check);
-            return check + '\n';
+            return lineToUse + '\n';
         }
         indentation = indentationFromLine(check, true);
-        return ' '.repeat(indentation) + `print("${lineI}:")\n` + check + '\n' + additionalLines.split('\n').filter((v) => v.trim() !== "").map((v) => ' '.repeat(indentation + indentSize) + v).join('\n')+  (additionalLines.length > 0 ? '\n' : '')
+        return ' '.repeat(indentation) + `print("${lineI}:")\n` + lineToUse + '\n' + additionalLines.split('\n').filter((v) => v.trim() !== "").map((v) => ' '.repeat(indentation + indentSize) + v).join('\n')+  (additionalLines.length > 0 ? '\n' : '')
     }
     if (endsWithColon(checkLine)) {
-        return treatColon(checkLine) + (additionalLines.length > 0 ? '\n' : '')  + GeneratePython(lines, continueLine, indentation + indentSize);
+        return treatColon(checkLine, line) + (additionalLines.length > 0 ? '\n' : '')  + GeneratePython(lines, continueLine, indentation + indentSize);
     }
     const split = splitByColon(checkLine);
     if(split) {
         console.log("split by colon", split);
-        let res = treatColon(split[0]);
+        let res = treatColon(split[0], split[0]);
         res += ' '.repeat(indentation) + split[1] + '\n';
         console.log("res after split", res);
-        return res + GeneratePython(lines, continueLine, indentation + indentSize);
+        return res + GeneratePython(lines, continueLine, indentation - indentSize);
     }
     indentation = indentationFromLine(checkLine);
     if(ignoreList.some(v => checkLine.trim() === v || checkLine.trimStart().startsWith(v+" "))) {
