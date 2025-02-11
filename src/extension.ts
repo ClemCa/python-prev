@@ -47,7 +47,7 @@ export function activate(context: vscode.ExtensionContext) {
             const line = state.findIndex(v => v.startsWith(position.line + ':'));
             if(line === -1) return;
             let hoverText = state[line].substring(state[line].indexOf(':')+1).trim();
-            let lineLength = document.lineAt(position.line).text.length;
+            let lineLength = document.lineAt(line).text.length;
             if(position.character < lineLength) return;
             if(position.character > lineLength + hoverText.split('\n')[0].length + 10) return;
             return { contents: hoverText.split('\n') };
@@ -118,7 +118,8 @@ def clemca_check_UUID_count(UUID, limit):
         clemca_python_prev_loop_dict[UUID] += 1
     return clemca_python_prev_loop_dict[UUID] <= limit
 def clemca_register_run(line):
-    clemca_never_run_dict[line] += 1
+    if line in clemca_never_run_dict:
+        clemca_never_run_dict[line] += 1
 def clemca_make_entry(line):
     clemca_never_run_dict[line] = 0
 def clemca_print_never_run():
@@ -340,7 +341,7 @@ function setKeysFromOutput(map: Map<number, number>, output: string[]) {
 function GeneratePython(lines: string[], lineI: number, indentation: number = 0): string {
     if (lineI >= lines.length) return '';
     console.log("generate python for", lineI, lines[lineI]);
-    const ignoreList = ["break", "continue", "pass", "except", "finally", "raise", "elif", "else"]; // added elif and else for the inline case
+    const ignoreList = ["break", "continue", "pass", "except", "finally", "raise", "else", "elif"]; // added elif and else for the inline case
     const neverRunCheck = ["if", "elif", "else", "while", "for"];
     let line = lines[lineI];
     if(line.trimStart().startsWith('@')) {
@@ -397,10 +398,10 @@ function GeneratePython(lines: string[], lineI: number, indentation: number = 0)
     if (checkLine.trim() === '') {
         return ' '.repeat(indentation) + `print("${lineI}:")\n` + additionalLines.split('\n').filter((v) => v.trim() !== "").map((v) => ' '.repeat(indentation) + v).join('\n') + (additionalLines.length > 0 ? '\n' : '') + GeneratePython(lines, continueLine, indentation);
     }
-    if(checkLine.match(/^\s*(?:elif|else)(?::|\s)$/))
-    {
-        return line + '\n' + ' '.repeat(indentation) + `print("${lineI}:")\n` + additionalLines.split('\n').filter((v) => v.trim() !== "").map((v) => ' '.repeat(indentation) + v).join('\n') + (additionalLines.length > 0 ? '\n' : '') + GeneratePython(lines, continueLine, indentation);
-    }
+    // if(checkLine.match(/^\s*(?:elif|else)(?::|\s)$/))
+    // {
+    //     return line + '\n' + ' '.repeat(indentation) + `print("${lineI}:")\n` + additionalLines.split('\n').filter((v) => v.trim() !== "").map((v) => ' '.repeat(indentation) + v).join('\n') + (additionalLines.length > 0 ? '\n' : '') + GeneratePython(lines, continueLine, indentation);
+    // }
     line = mockInput(line, checkLine, indentation, lineI, lines);
     console.log("checkline", checkLine);
     if(checkLine.trimStart().startsWith("def") && line.length > checkLine.length) {
@@ -424,14 +425,6 @@ function GeneratePython(lines: string[], lineI: number, indentation: number = 0)
         let restOfLine = stripComments(checkLine.split('=')[1]).trim();
         indentation = indentationFromLine(checkLine);
         return ' '.repeat(indentation) + `print("${lineI}: " + str(${variable} ${operator} (${restOfLine})))\n` + line + '\n' + additionalLines.split('\n').filter((v) => v.trim() !== "").map((v) => ' '.repeat(indentation) + v).join('\n') + (additionalLines.length > 0 ? '\n' : '') + GeneratePython(lines, continueLine, indentation);
-    }
-    let typedAssignmentMatch = checkLine.match(/^\s*([a-zA-Z_][a-zA-Z_0-9]*)\s*:\s*([a-zA-Z_].*)\s*=/);
-    if(typedAssignmentMatch)
-    {
-        console.log("typed assignment", checkLine);
-        let variable = typedAssignmentMatch[1];
-        indentation = indentationFromLine(checkLine);
-        return line + '\n' + ' '.repeat(indentation) + `print("${lineI}: " + str(${typedAssignmentMatch[1].trim()}))\n` + additionalLines.split('\n').filter((v) => v.trim() !== "").map((v) => ' '.repeat(indentation) + v).join('\n') + (additionalLines.length > 0 ? '\n' : '') + GeneratePython(lines, continueLine, indentation);
     }
     // line starts with print and isn't a multiline
     if (checkLine.match(/^\s*print\s*\(/) && !returnPreviously) {
@@ -462,32 +455,41 @@ function GeneratePython(lines: string[], lineI: number, indentation: number = 0)
         let parameterStrings = parameters.map(v => indent + `print("${lineI}:${v}: ", end="")\n${indent}print(${v})`);
         return line + '\n' + parameterStrings.join('\n') + '\n' + additionalLines.split('\n').filter((v) => v.trim() !== "").map((v) => ' '.repeat(indentation) + v).join('\n') + (additionalLines.length > 0 ? '\n' : '') + GeneratePython(lines, continueLine, indentation);
     }
-    function treatColon(check: string, lineToUse: string) {
+    function treatColon(check: string) {
         console.log("treat colon", check);
+        const colonLine = check.substring(check.lastIndexOf('\n')+1);
+        console.log("treat colon line", colonLine);
         if(ignoreList.some(v => {
-            const trimmed = check.trimStart();
+            const trimmed = colonLine.trimStart();
             return trimmed.startsWith(v + ' ') || trimmed.startsWith(v + ':');
         })) {
-            console.log("some line", lineToUse);
-            indentation = indentationFromLine(check);
-            return lineToUse + '\n';
+            console.log("some line", check);
+            indentation = indentationFromLine(colonLine);
+            return check + '\n';
         }
-        indentation = indentationFromLine(check, true);
-        return ' '.repeat(indentation) + `print("${lineI}:")\n` + lineToUse + '\n' + additionalLines.split('\n').filter((v) => v.trim() !== "").map((v) => ' '.repeat(indentation + indentSize) + v).join('\n')+  (additionalLines.length > 0 ? '\n' : '')
+        indentation = indentationFromLine(colonLine);
+        return ' '.repeat(indentation - indentSize) + `print("${lineI}:")\n` + check + '\n';
     }
     if (endsWithColon(checkLine)) {
-        return treatColon(checkLine, line) + (additionalLines.length > 0 ? '\n' : '')  + GeneratePython(lines, continueLine, indentation + indentSize);
+        const treated = treatColon(line);
+        console.log("identation after treat colon", indentation)
+        return treated + additionalLines.split('\n').filter((v) => v.trim() !== "").map((v) => ' '.repeat(indentation) + v).join('\n') + (additionalLines.length > 0 ? '\n' : '') + GeneratePython(lines, continueLine, indentation + indentSize);
     }
-    const split = splitByColon(checkLine);
+    const split = splitByColon(line);
     if(split) {
         console.log("split by colon", split);
-        let res = treatColon(split[0], split[0]);
-        res += ' '.repeat(indentation) + split[1] + '\n';
+        if(ignoreList.some(v => [";", ":"].map((d) => v+d).includes(split[1].trim()) || split[1].trimStart().startsWith(v+" "))) {
+            split[0] = "";
+        }
+        let res = split[0]+(split[0].length > 0 ? "\n" : "")+treatColon(split[1]);
+        let indent = indentationFromLine(split[1]);
+        res += ' '.repeat(indent) + additionalLines.trim() + '\n';
+        res += ' '.repeat(indent) + split[2] + '\n';
         console.log("res after split", res);
-        return res + GeneratePython(lines, continueLine, indentation - indentSize);
+        return res + GeneratePython(lines, continueLine, indent);
     }
     indentation = indentationFromLine(checkLine);
-    if(ignoreList.some(v => checkLine.trim() === v || checkLine.trimStart().startsWith(v+" "))) {
+    if(ignoreList.some(v => [";", ":"].map((d) => v+d).includes(checkLine.trim()) || checkLine.trimStart().startsWith(v+" "))) {
         indentation = indentationFromLine(lines[continueLine] ?? lines[lines.length - 1], false);
         return line + '\n' + additionalLines.split('\n').filter((v) => v.trim() !== "").map((v) => ' '.repeat(indentation) + v).join('\n') + (additionalLines.length > 0 ? '\n' : '') + GeneratePython(lines, continueLine, indentation);
     }
@@ -495,12 +497,13 @@ function GeneratePython(lines: string[], lineI: number, indentation: number = 0)
     return line + '\n' + ' '.repeat(indentation) + `print("${lineI}:")\n` + additionalLines.split('\n').filter((v) => v.trim() !== "").map((v) => ' '.repeat(indentation) + v).join('\n') + (additionalLines.length > 0 ? '\n' : '') + GeneratePython(lines, continueLine, indentation);
 }
 function stripComments(line: string) {
-    return line.split('#')[0];
+    return line.split('\n').map((l) => l.split('#')[0]).join('\n');
 }
 function indentationFromLine(line: string, ignoreColon: boolean = false) {
     return getIndent(line) + (ignoreColon === false && endsWithColon(line) ? indentSize : 0);
 }
 function endsWithColon(line: string) {
+    console.log("ends with colon check", line);
     return stripComments(line).trimEnd().endsWith(':');
 }
 function splitByColon(line: string) {
@@ -525,7 +528,11 @@ function splitByColon(line: string) {
                 [i] = skipString(stripped, i, 0);
                 break;
             case ':':
-                if(stack === 0) return [stripped.slice(0, i+1), stripped.slice(i+1).trim()];
+                if(stack === 0) {
+                    const p1 = stripped.slice(0, i+1).split('\n');
+                    const p0 = p1.length > 1 ? p1.slice(0, -1).join('\n') : "";
+                    return [p0, p1[p1.length-1], stripped.slice(i+1).trim()];
+                }
         }
     }
     return null;
