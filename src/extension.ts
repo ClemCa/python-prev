@@ -158,7 +158,18 @@ atexit.register(clemca_exit_handler)\n`;
     let pythonCode = pythonStarterCode + GeneratePython(lines, 0);
     setKeysFromCode(sourceMap, pythonCode);
     log("generated python code", pythonCode, "with source map", sourceMap);
-    let childProcess = child.spawn('python', ['-c', pythonCode]);
+    console.log(pythonCode.length);
+    let childProcess;
+    if(pythonCode.length > 30000) { // observed a breakdown over 31580 or so
+        // TODO get path from node
+        const tempFilePath = "";
+        const tempFile = await vscode.workspace.fs.createDirectory(vscode.Uri.parse('file:///tmp'));
+        const tempFileUri = vscode.Uri.parse('file:///tmp/python-prev.py');
+        await vscode.workspace.fs.writeFile(tempFileUri, Buffer.from(pythonCode));
+        childProcess = child.spawn('python', [tempFilePath]);
+    } else {
+        childProcess = child.spawn('python', ['-c', pythonCode]);
+    }
     let output = [] as string[];
     function kill() {
         if(childProcess.killed) return;
