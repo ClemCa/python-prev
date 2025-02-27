@@ -11,8 +11,13 @@ let activeErrorColor: string;
 let skipNext = false;
 let earliestError = Infinity;
 let indentSize = 4;
+let indentMode = true;
 let sourceMap = new Map<number, number>();
 let lastTimer: NodeJS.Timeout | undefined;
+
+//! DISABLED LOGS FOR PROD
+let log = (message?: any, ...optionalParams: any[]) => {};
+// let log = console.log;
 
 let cancelTokens: Map<string, vscode.CancellationTokenSource> = new Map<string, vscode.CancellationTokenSource>();
 
@@ -85,15 +90,17 @@ async function previewRun(change: vscode.TextDocumentChangeEvent | { document: v
     let state = workspaceMemento.get(fileName) || [];
     if(change.contentChanges.length > 0 || state.length === 0)
     {
-        console.log("content change length", change.contentChanges.length, "state length", state.length);
+        log("content change length", change.contentChanges.length, "state length", state.length);
         let results = await runPython(change.document.getText(), cancelToken.token);
         if(cancelToken.token.isCancellationRequested) {
             cancelToken.dispose(); // will be replaced by the next run, no need to delete it from the map
         }
         if(vscode.window.activeTextEditor) {
             indentSize = vscode.window.activeTextEditor.options.tabSize as number;
+            indentMode = vscode.window.activeTextEditor.options.insertSpaces as boolean;
         } else {
             indentSize = vscode.workspace.getConfiguration('editor').get('tabSize') as number;
+            indentMode = vscode.workspace.getConfiguration('editor').get('insertSpaces') as boolean;
         }
         earliestError = results.findIndex(r => r.startsWith('Error: '));
         if(earliestError === -1) earliestError = Infinity;
@@ -114,7 +121,7 @@ async function previewRun(change: vscode.TextDocumentChangeEvent | { document: v
         let stateLine = state[i].substring(state[i].indexOf(':')+1).trim();
         if(stateLine === '') continue;
         stateLine = stateLine.replaceAll('\n', '\\n');
-        console.log("mapped line", mappedLine, "stateline:", stateLine,"from", state[i]);
+        log("mapped line", mappedLine, "stateline:", stateLine,"from", state[i]);
         displayInline(mappedLine, stateLine, isError ? isCurrent ? DecorationMode.activeError : DecorationMode.error : isCurrent ? DecorationMode.active : DecorationMode.regular, decorations);
     }
     vscode.window.activeTextEditor.setDecorations(decorationType, decorations);
@@ -128,29 +135,29 @@ async function runPython(documentText: string, cancelToken: vscode.CancellationT
 `clemca_python_prev_loop_dict = {}
 clemca_never_run_dict = {}
 def clemca_check_UUID_count(UUID, limit):
-${Spaces(indentSize)}if UUID not in clemca_python_prev_loop_dict:
-${Spaces(indentSize*2)}clemca_python_prev_loop_dict[UUID] = 1
-${Spaces(indentSize)}else:
-${Spaces(indentSize*2)}clemca_python_prev_loop_dict[UUID] += 1
-${Spaces(indentSize)}return clemca_python_prev_loop_dict[UUID] <= limit
+${Spaces(1)}if UUID not in clemca_python_prev_loop_dict:
+${Spaces(2)}clemca_python_prev_loop_dict[UUID] = 1
+${Spaces(1)}else:
+${Spaces(2)}clemca_python_prev_loop_dict[UUID] += 1
+${Spaces(1)}return clemca_python_prev_loop_dict[UUID] <= limit
 def clemca_register_run(line):
-${Spaces(indentSize)}if line in clemca_never_run_dict:
-${Spaces(indentSize*2)}clemca_never_run_dict[line] += 1
+${Spaces(1)}if line in clemca_never_run_dict:
+${Spaces(2)}clemca_never_run_dict[line] += 1
 def clemca_make_entry(line):
-${Spaces(indentSize)}clemca_never_run_dict[line] = 0
+${Spaces(1)}clemca_never_run_dict[line] = 0
 def clemca_print_never_run():
-${Spaces(indentSize)}for key in clemca_never_run_dict:
-${Spaces(indentSize*2)}if clemca_never_run_dict[key] == 0:
-${Spaces(indentSize*3)}print(key+":"+"!!! Never runs")
-${Spaces(indentSize*2)}else:
-${Spaces(indentSize*3)}print(key+":"+str(clemca_never_run_dict[key])+" iterations")
+${Spaces(1)}for key in clemca_never_run_dict:
+${Spaces(2)}if clemca_never_run_dict[key] == 0:
+${Spaces(3)}print(key+":"+"!!! Never runs")
+${Spaces(2)}else:
+${Spaces(3)}print(key+":"+str(clemca_never_run_dict[key])+" iterations")
 import atexit
 def clemca_exit_handler():
-${Spaces(indentSize)}clemca_print_never_run()
+${Spaces(1)}clemca_print_never_run()
 atexit.register(clemca_exit_handler)\n`;
     let pythonCode = pythonStarterCode + GeneratePython(lines, 0);
     setKeysFromCode(sourceMap, pythonCode);
-    console.log("generated python code", pythonCode, "with source map", sourceMap);
+    log("generated python code", pythonCode, "with source map", sourceMap);
     let childProcess = child.spawn('python', ['-c', pythonCode]);
     let output = [] as string[];
     function kill() {
@@ -239,14 +246,15 @@ atexit.register(clemca_exit_handler)\n`;
     }).catch((_) => {});
     if(cancelToken.isCancellationRequested) return [];
     output = Fuse(output);
-    console.log("Fused", output);
+    log("Fused", output);
     setKeysFromOutput(sourceMap, output);
     return output;
     // return output.map(r => r.slice(r.indexOf(':')+1).trim());
 }
 
 function Spaces(count: number) {
-    return ' '.repeat(count);
+    if(indentMode) return ' '.repeat(count * indentSize);
+    return '\t'.repeat(count);
 }
 
 function Deduplicate(output: string[]) { // we keep the original order
@@ -258,7 +266,7 @@ function Deduplicate(output: string[]) { // we keep the original order
 }
 
 function Fuse(output: string[]) { // fuse, vscode forces our hand as the order of decorations is consistent but not guaranteed to be in the order of the array
-    console.log("raw output", output);
+    log("raw output", output);
     output = Deduplicate(output);
     let fused = [] as string[];
     let highestValue = 0;
@@ -295,7 +303,7 @@ function splitUpTo(s: string, separator: string, limit: number) {
         left = next + separator.length;
     }
     result.push(s.slice(left));
-    console.log("splitUpTo", s, separator, limit, result);
+    log("splitUpTo", s, separator, limit, result);
     return result;
 }
 
@@ -323,7 +331,7 @@ function displayInline(line: number, text: string, decorationMode: DecorationMod
             color = activeErrorColor;
             break;
     };
-    console.log("Displaying", line, text, color);
+    log("Displaying", line, text, color);
     let lines = text.split(/\r?\n/);
     let decoration = { range, renderOptions: { after: { contentText: lines[lines.length - 1], color: color } } };
     // is there already an identical decoration?
@@ -360,7 +368,7 @@ function setKeysFromOutput(map: Map<number, number>, output: string[]) {
 }
 function GeneratePython(lines: string[], lineI: number, indentation: number = 0): string {
     if (lineI >= lines.length) return '';
-    console.log("generate python for", lineI, lines[lineI]);
+    log("generate python for", lineI, lines[lineI]);
     const ignoreList = ["break", "continue", "pass", "except", "finally", "raise", "else", "elif"]; // added elif and else for the inline case
     const neverRunCheck = ["if", "elif", "else", "while", "for"];
     let line = lines[lineI];
@@ -371,7 +379,7 @@ function GeneratePython(lines: string[], lineI: number, indentation: number = 0)
     let additionalLines = '';
     let returnPreviously = line.trim().startsWith('return');
     let [openChain, inString] = checkLineForOpen(line);
-    console.log("before open chain", inString, openChain, line, continueLine);
+    log("before open chain", inString, openChain, line, continueLine);
     while(continueLine < lines.length - 1 && (lines[continueLine].trim().split('#')[0].endsWith('\\') || openChain > 0 || inString > 0)) { // all comments besides the first one are ignored
         let preComment = line.split('#')[0].split('\\')[0];
         let postComment = line.split('#')[1];
@@ -387,7 +395,7 @@ function GeneratePython(lines: string[], lineI: number, indentation: number = 0)
             else additionalLines += 'print("' + continueLine + ':")\n';
         }
     }
-    console.log("out of open chain", inString, openChain, line, continueLine);
+    log("out of open chain", inString, openChain, line, continueLine);
     let checkLine = line + '';
     if(neverRunCheck.some(v => line.trimStart().startsWith(v+" ") || line.trimStart().startsWith(v+":"))) {
         let entryIndentation = indentationFromLine(checkLine, true);
@@ -423,9 +431,9 @@ function GeneratePython(lines: string[], lineI: number, indentation: number = 0)
     //     return line + '\n' + Spaces(indentation) + `print("${lineI}:")\n` + additionalLines.split('\n').filter((v) => v.trim() !== "").map((v) => Spaces(indentation) + v).join('\n') + (additionalLines.length > 0 ? '\n' : '') + GeneratePython(lines, continueLine, indentation);
     // }
     line = mockInput(line, checkLine, indentation, lineI, lines);
-    console.log("checkline", checkLine);
+    log("checkline", checkLine);
     if(checkLine.trimStart().startsWith("def") && line.length > checkLine.length) {
-        console.log("mocked def", line);
+        log("mocked def", line);
         let endOfDef = continueLine;
         while(endOfDef < lines.length && (lines[endOfDef].match(/^\s*/)?.[0].length ?? 0) > indentation) endOfDef++;
         return line + '\n' + GeneratePython(lines, endOfDef, indentation);
@@ -449,7 +457,7 @@ function GeneratePython(lines: string[], lineI: number, indentation: number = 0)
     let typedAssignmentMatch = checkLine.match(/^\s*([a-zA-Z_][a-zA-Z_0-9]*)\s*:\s*([a-zA-Z_].*)\s*=/);
     if(typedAssignmentMatch)
     {
-        console.log("typed assignment", checkLine);
+        log("typed assignment", checkLine);
         let variable = typedAssignmentMatch[1];
         indentation = indentationFromLine(checkLine);
         return line + '\n' + Spaces(indentation) + `print("${lineI}: " + str(${typedAssignmentMatch[1].trim()}))\n` + additionalLines.split('\n').filter((v) => v.trim() !== "").map((v) => Spaces(indentation) + v).join('\n') + (additionalLines.length > 0 ? '\n' : '') + GeneratePython(lines, continueLine, indentation);
@@ -464,7 +472,7 @@ function GeneratePython(lines: string[], lineI: number, indentation: number = 0)
     if (checkLine.match(/^\s*for/)) {
         indentation = indentationFromLine(checkLine, true);
         let afterIn = splitUpTo(checkLine, ' in ', 1)[1].split(':')[0].trim();
-        return Spaces(indentation) + `print("${lineI}:"+str(${afterIn}))\n` + line + '\n' + additionalLines.split('\n').filter((v) => v.trim() !== "").map((v) => Spaces(indentation + indentSize) + v).join('\n') + (additionalLines.length > 0 ? '\n' : '') + GeneratePython(lines, continueLine, indentation + indentSize);
+        return Spaces(indentation) + `print("${lineI}:"+str(${afterIn}))\n` + line + '\n' + additionalLines.split('\n').filter((v) => v.trim() !== "").map((v) => Spaces(indentation + 1) + v).join('\n') + (additionalLines.length > 0 ? '\n' : '') + GeneratePython(lines, continueLine, indentation + 1);
     }
     if (checkLine.match(/^\s*return\s+/) || returnPreviously) {
         let nextIndentation = continueLine >= lines.length ? 0 : indentationFromLine(lines[continueLine], true);
@@ -484,28 +492,28 @@ function GeneratePython(lines: string[], lineI: number, indentation: number = 0)
         return line + '\n' + parameterStrings.join('\n') + '\n' + additionalLines.split('\n').filter((v) => v.trim() !== "").map((v) => Spaces(indentation) + v).join('\n') + (additionalLines.length > 0 ? '\n' : '') + GeneratePython(lines, continueLine, indentation);
     }
     function treatColon(check: string) {
-        console.log("treat colon", check);
+        log("treat colon", check);
         const colonLine = check.substring(check.lastIndexOf('\n')+1);
-        console.log("treat colon line", colonLine);
+        log("treat colon line", colonLine);
         if(ignoreList.some(v => {
             const trimmed = colonLine.trimStart();
             return trimmed.startsWith(v + ' ') || trimmed.startsWith(v + ':');
         })) {
-            console.log("some line", check);
+            log("some line", check);
             indentation = indentationFromLine(colonLine);
             return check + '\n';
         }
         indentation = indentationFromLine(colonLine);
-        return Spaces(indentation - indentSize) + `print("${lineI}:")\n` + check + '\n';
+        return Spaces(indentation - 1) + `print("${lineI}:")\n` + check + '\n';
     }
     if (endsWithColon(checkLine)) {
         const treated = treatColon(line);
-        console.log("indentation after treat colon", indentation);
-        return treated + additionalLines.split('\n').filter((v) => v.trim() !== "").map((v) => Spaces(indentation) + v).join('\n') + (additionalLines.length > 0 ? '\n' : '') + GeneratePython(lines, continueLine, indentation + indentSize);
+        log("indentation after treat colon", indentation);
+        return treated + additionalLines.split('\n').filter((v) => v.trim() !== "").map((v) => Spaces(indentation) + v).join('\n') + (additionalLines.length > 0 ? '\n' : '') + GeneratePython(lines, continueLine, indentation + 1);
     }
     const split = splitByColon(line);
     if(split) {
-        console.log("split by colon", split);
+        log("split by colon", split);
         if(ignoreList.some(v => [";", ":"].map((d) => v+d).includes(split[1].trim()) || split[1].trimStart().startsWith(v+" "))) {
             split[0] = "";
         }
@@ -513,7 +521,7 @@ function GeneratePython(lines: string[], lineI: number, indentation: number = 0)
         let indent = indentationFromLine(split[1]);
         res += Spaces(indent) + additionalLines.trim() + '\n';
         res += Spaces(indent) + split[2] + '\n';
-        console.log("res after split", res);
+        log("res after split", res);
         return res + GeneratePython(lines, continueLine, indent);
     }
     indentation = indentationFromLine(checkLine);
@@ -521,23 +529,23 @@ function GeneratePython(lines: string[], lineI: number, indentation: number = 0)
         indentation = indentationFromLine(lines[continueLine] ?? lines[lines.length - 1], false);
         return line + '\n' + additionalLines.split('\n').filter((v) => v.trim() !== "").map((v) => Spaces(indentation) + v).join('\n') + (additionalLines.length > 0 ? '\n' : '') + GeneratePython(lines, continueLine, indentation);
     }
-    console.log("matched nothing for", checkLine);
+    log("matched nothing for", checkLine);
     return line + '\n' + Spaces(indentation) + `print("${lineI}:")\n` + additionalLines.split('\n').filter((v) => v.trim() !== "").map((v) => Spaces(indentation) + v).join('\n') + (additionalLines.length > 0 ? '\n' : '') + GeneratePython(lines, continueLine, indentation);
 }
 function stripComments(line: string) {
     return line.split('\n').map((l) => l.split('#')[0]).join('\n');
 }
 function indentationFromLine(line: string, ignoreColon: boolean = false) {
-    return getIndent(line) + (ignoreColon === false && endsWithColon(line) ? indentSize : 0);
+    return getIndent(line) + (ignoreColon === false && endsWithColon(line) ? 1 : 0);
 }
 function endsWithColon(line: string) {
-    console.log("ends with colon check", line);
+    log("ends with colon check", line);
     return stripComments(line).trimEnd().endsWith(':');
 }
 function splitByColon(line: string) {
     // check colon in context 0 (eg else: something, not something[:2])
     const stripped = stripComments(line);
-    console.log("split checking", stripped);
+    log("split checking", stripped);
     let stack = 0;
     for(let i = 0; i < stripped.length; i++) {
         switch(stripped[i]) {
@@ -570,7 +578,7 @@ function mockInput(line: string, checkline: string, indentation: number, lineI: 
     let UUID = Math.random().toString(36).substring(2, 15) + Math.random().toString(36).substring(2, 15);
     let comment = checkline.split('#')[1]?.trim() ?? '';
     let {mock, limit} = passComments(comment);
-    let checkCode = Spaces(indentation) + `if not clemca_check_UUID_count('${UUID}', ${limit ?? 100}):\n` + Spaces(indentSize + indentation) + "raise Exception('ClemExcep"+lineI+":Too many calls to input. Use a mock comment if necessary.')\n";
+    let checkCode = Spaces(indentation) + `if not clemca_check_UUID_count('${UUID}', ${limit ?? 100}):\n` + Spaces(indentation + 1) + "raise Exception('ClemExcep"+lineI+":Too many calls to input. Use a mock comment if necessary.')\n";
     const pattern = /(?<![a-zA-Z0-9_])input\s*\((.*?)\)/; // thx chatgpt I have no idea why this works when a non-capturing group without a lookbehind doesn't
     return checkCode + line.replace(checkline, checkline.replace(pattern, mock ?? '""'));
 }
@@ -582,7 +590,7 @@ function mockOrLimitLine(line: string, lineI: number, lines: string[]) {
     if(!limit) return line;
     let indentation = indentationFromLine(line, true);
     let UUID = Math.random().toString(36).substring(2, 15) + Math.random().toString(36).substring(2, 15);
-    return Spaces(indentation) + `if not clemca_check_UUID_count('${UUID}', ${limit}):\n` + Spaces(indentSize + indentation) + "raise Exception('ClemExcep"+lineI+":Too many calls.')\n"+line;
+    return Spaces(indentation) + `if not clemca_check_UUID_count('${UUID}', ${limit}):\n` + Spaces(indentation + 1) + "raise Exception('ClemExcep"+lineI+":Too many calls.')\n"+line;
 }
 
 function mockLine(line: string, mock: string, lineI: number, lines: string[]) {
@@ -617,7 +625,7 @@ function mockDef(line: string, mock: string, lineI: number, lines: string[]) {
     trueCopy[lineI] = line.split('#')[0].replace(/def\s+([a-zA-Z_][a-zA-Z_0-9]*)/, `def ${GUUID}`);
     // 0 to up to nextLineOfSuperiorIndentation
     let python = GeneratePython(trueCopy, lineI, indentationFromLine(line, true));
-    console.log("generated python for def", python, "from", trueCopy);
+    log("generated python for def", python, "from", trueCopy);
     finalLine = python + '\n' + Spaces(indentationFromLine(line, true)) + `${GUUID}(${mock})\n` + copy;
     return finalLine;
 }
@@ -636,9 +644,25 @@ function passComments(comment: string): { limit?: number, mock?: string } {
 }
 
 function getIndent(line: string) {
-    for (let i = 0; i < line.length; i++) {
-        if (line[i] !== ' ') {
-            return i;
+    let i = 0;
+    let size = 0;
+    log("get indent for", line, indentMode);
+    while(i < line.length) {
+        if(indentMode) {
+            if(!line.substring(i).startsWith(' '.repeat(indentSize))) {
+                log("indent", size);
+                return size;
+            }
+            i += indentSize;
+            size++;
+        }
+        else {
+            if(line[i] !== '\t') {
+                log("indent", size);
+                return size;
+            }
+            i++;
+            size++;
         }
     }
     return line.length;
@@ -669,7 +693,7 @@ function checkLineForOpen(line: string, inString: number = 0) {
         if(splitString[i] === ')' || splitString[i] === ']' || splitString[i] === '}') openChain--;
     }
     if(openChain > 0)
-        console.log("open chain", openChain, "in string", inString, "from", line);
+        log("open chain", openChain, "in string", inString, "from", line);
     return [openChain, inString];
 }
 
